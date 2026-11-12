@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="Clausper: a voice mod for Claude Code. Hear a spoken summary of every reply, see captions and the files that changed, and say your next prompt.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Clausper: hear what Claude did, say what's next">
+<meta property="og:description" content="A voice mod for Claude Code. Spoken summaries, live captions, a clickable list of changed files, and hands-free voice prompts. Runs on your subscription; your voice stays on your Mac.">
+<meta property="og:image" content="assets/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#17161a">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%2317161a'/%3E%3Cpath d='M6 16h2M11 12v8M16 7v18M21 11v10M26 15v2' stroke='%23ff6a3d' stroke-width='2.6' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
 <title>Clausper</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -104,21 +111,21 @@
   .banner {
     position: relative; overflow: hidden; border-radius: var(--r-xl); min-height: 520px;
     background:
-      radial-gradient(900px 300px at 50% 115%, var(--hill) 0 42%, transparent 43%),
-      radial-gradient(700px 260px at 80% 100%, color-mix(in oklab, var(--hill) 85%, var(--sky-3)) 0 40%, transparent 41%),
-      radial-gradient(1200px 500px at 20% -10%, var(--sky-1), transparent 60%),
-      linear-gradient(180deg, var(--sky-1) 0%, var(--sky-2) 45%, var(--sky-3) 100%);
+      linear-gradient(180deg, rgba(8, 12, 40, 0.10) 0%, rgba(8, 12, 40, 0.28) 45%, rgba(8, 10, 30, 0.82) 100%),
+      url("assets/hero.jpg") center 35% / cover no-repeat, var(--sky-3);
     box-shadow: var(--shadow);
     display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; align-items: end;
     padding: 28px; color: #fff;
   }
-  .banner::before { content: ""; position: absolute; inset: 0; background: radial-gradient(60% 50% at 50% 100%, rgba(0,0,0,.35), transparent 70%); pointer-events: none; }
+  .banner::before { content: ""; position: absolute; inset: 0; background: radial-gradient(70% 60% at 25% 100%, rgba(0,0,0,.45), transparent 70%); pointer-events: none; }
+  :root[data-theme="dark"] .banner { background-image: linear-gradient(180deg, rgba(8, 10, 30, 0.35) 0%, rgba(8, 10, 30, 0.5) 45%, rgba(8, 10, 30, 0.9) 100%), url("assets/hero.jpg"); }
   .banner > * { position: relative; }
   .hero-copy { display: grid; gap: 16px; align-content: end; padding-bottom: 6px; }
   .tag { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.25); color: #fff; border-radius: var(--r-pill); padding: 6px 12px; width: max-content; backdrop-filter: blur(8px); }
   .tag .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--listen); box-shadow: 0 0 0 0 rgba(157,255,184,.6); animation: pulse 2.2s infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(157,255,184,.55); } 70% { box-shadow: 0 0 0 9px rgba(157,255,184,0); } 100% { box-shadow: 0 0 0 0 rgba(157,255,184,0); } }
-  h1 { margin: 0; font-size: clamp(38px, 6vw, 72px); line-height: 1; font-weight: 800; letter-spacing: -0.045em; text-wrap: balance; max-width: 14ch; text-shadow: 0 2px 24px rgba(0,0,0,.25); }
+  h1 { margin: 0; font-size: clamp(38px, 6vw, 72px); line-height: 1; font-weight: 800; letter-spacing: -0.045em; text-wrap: balance; max-width: 14ch; text-shadow: 0 2px 28px rgba(0,0,0,.45); }
+  .lede, .meta { text-shadow: 0 1px 12px rgba(0,0,0,.4); }
   h1 em { font-style: normal; color: var(--listen); }
   .lede { margin: 0; max-width: 52ch; font-size: clamp(16px, 1.4vw, 19px); color: rgba(255,255,255,.88); }
   .meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; color: rgba(255,255,255,.85); }
@@ -200,6 +207,18 @@
   .note { display: flex; gap: 10px; align-items: flex-start; background: var(--warn-soft); color: var(--ink); border-radius: var(--r-md); padding: 12px 14px; font-size: 14.5px; margin-top: 14px; }
   .note .ic { color: var(--warn); margin-top: 2px; }
 
+  .faq { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .faq details { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 4px 18px; min-width: 0; }
+  .faq summary { cursor: pointer; list-style: none; font-weight: 700; letter-spacing: -0.01em; padding: 14px 0; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::after { content: "+"; font-family: var(--mono); color: var(--ink-3); font-size: 18px; flex: none; }
+  .faq details[open] summary::after { content: "–"; }
+  .faq p { margin: 0 0 16px; color: var(--ink-2); font-size: 15px; }
+  .cta-band { margin-top: 56px; background: var(--pill); color: var(--pill-ink); border-radius: var(--r-xl); padding: 36px; display: flex; justify-content: space-between; gap: 20px; align-items: center; flex-wrap: wrap; }
+  .cta-band h2 { color: inherit; max-width: 20ch; }
+  .cta-band p { margin: 6px 0 0; opacity: .75; max-width: 46ch; }
+  .cta-band .btn-accent { font-size: 15px; padding: 12px 20px; }
+  @media (max-width: 600px) { .faq { grid-template-columns: minmax(0, 1fr); } .cta-band { padding: 24px; } }
   footer { padding-block: 56px 40px; color: var(--ink-3); font-size: 14px; }
   footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
   footer a { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
@@ -264,7 +283,7 @@
     <a class="chip" href="#features">Listen</a>
     <a class="chip" href="#how">How it works</a>
     <a class="chip" href="#install">Install</a>
-    <a class="chip" href="#install">macOS</a>
+    <a class="chip" href="#faq">FAQ</a>
     <a class="chip" href="#features">Private</a>
   </nav>
 
@@ -366,6 +385,22 @@ curl -L -o ~/.clausper/models/ggml-base.en.bin \
         <div class="r"><code>/clausper voice Samantha</code><span>Pick a system voice; <code>voices</code> lists them</span></div>
         <div class="r"><code>/clausper setup</code><span>Check the listening tools</span></div>
       </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="sec-head"><h2>Questions <small>before you install</small></h2></div>
+    <div class="faq">
+      <details><summary>Does it cost extra?</summary><p>No. Summaries are written by Haiku through your own Claude Code session, so they count against the subscription you already have. There is no API key to buy and no account to create.</p></details>
+      <details><summary>Where does my voice go?</summary><p>Nowhere. Recording uses sox and transcription uses whisper.cpp, both running on your Mac with a model stored in your home folder. Clausper adds no network calls of its own.</p></details>
+      <details><summary>Will it read me the whole reply?</summary><p>No, that is the point. Short replies are read as they are. Long ones get the opening sentence at once, then a two-sentence summary plus anything Claude asked you. The full text stays in the terminal.</p></details>
+      <details><summary>What if it mishears me?</summary><p>Say “cancel” to skip a turn. Use fill mode and Clausper puts your words in the prompt box instead of sending them, so you can check them first. The pane shows what it heard and for how long.</p></details>
+      <details><summary>Does it work on Linux or Windows?</summary><p>The pane, captions and change list work anywhere Claude Code runs. Speech uses the macOS system voice today, and listening is tested on macOS. Linux speech is on the list.</p></details>
+      <details><summary>Can I pick the voice?</summary><p>Yes. Run <code>/clausper voices</code> to list every voice installed on your Mac and <code>/clausper voice Samantha</code> to choose one. The choice is remembered.</p></details>
+    </div>
+    <div class="cta-band">
+      <div><h2>Stop reading. Start listening.</h2><p>One line installs it. Your next Claude Code session talks back.</p></div>
+      <button class="btn btn-accent" type="button" data-copy="/plugin install clausper --marketplace kenawak/clausper"><svg class="ic"><use href="#i-copy"/></svg> Copy install line</button>
     </div>
   </section>
 </main>
