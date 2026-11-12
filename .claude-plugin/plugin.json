@@ -21,5 +21,11 @@
     "whisper",
     "local-first",
     "macos"
-  ]
+  ],
+  "displayName": "Clausper",
+  "icon": "./.claude-plugin/icon.png",
+  "documentationUrl": "https://github.com/kenawak/clausper#readme",
+  "supportUrl": "https://github.com/kenawak/clausper/issues",
+  "privacyPolicyUrl": "https://clausper.kenawak.dev/privacy.html",
+  "termsOfServiceUrl": "https://clausper.kenawak.dev/terms.html"
 }
