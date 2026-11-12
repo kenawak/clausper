@@ -1,5 +1,27 @@
 {
   "name": "clausper",
-  "owner": { "name": "kenawak" },
-  "plugins": [{ "name": "clausper", "source": "./" }]
+  "owner": {
+    "name": "kenawak"
+  },
+  "plugins": [
+    {
+      "name": "clausper",
+      "source": "./",
+      "description": "Speaks a short summary of every Claude Code reply, captions it live, lists the files that changed, and lets you answer by voice. Runs on your subscription; your voice stays on your Mac.",
+      "category": "productivity",
+      "tags": [
+        "voice",
+        "text-to-speech",
+        "speech-to-text",
+        "accessibility",
+        "summaries",
+        "captions",
+        "hands-free",
+        "whisper",
+        "local-first",
+        "macos"
+      ]
+    }
+  ],
+  "description": "Clausper, the voice mod for Claude Code."
 }

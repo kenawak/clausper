@@ -1,10 +1,25 @@
 {
   "name": "clausper",
   "version": "0.2.2",
-  "description": "Whispers a spoken summary of each Claude Code response and keeps a clickable list of what changed.",
+  "description": "Speaks a short summary of every Claude Code reply, captions it live, lists the files that changed, and lets you answer by voice. Runs on your subscription; your voice stays on your Mac.",
   "types": "./types/index.d.ts",
   "license": "MIT",
   "author": {
-    "name": "Ken"
-  }
+    "name": "Ken",
+    "url": "https://github.com/kenawak"
+  },
+  "homepage": "https://clausper.kenawak.dev",
+  "repository": "https://github.com/kenawak/clausper",
+  "keywords": [
+    "voice",
+    "text-to-speech",
+    "speech-to-text",
+    "accessibility",
+    "summaries",
+    "captions",
+    "hands-free",
+    "whisper",
+    "local-first",
+    "macos"
+  ]
 }
