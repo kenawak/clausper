@@ -50,6 +50,8 @@ declare module 'claude-code' {
       listenMode: ListenMode
       isListening: boolean
       heard: string | null
+      /** What the last listen did, in one line: for the pane and for debugging. */
+      lastListen: string | null
     }
   }
 }

@@ -9,6 +9,11 @@ const MAX_ANSWER_CHARS = 14000
 // A reply this short is spoken as it is: no summary call, no wait.
 const SHORT_REPLY_CHARS = 320
 const RECORD_SECONDS = 25
+// sox `silence`: start on 0.1 s above 2 % of full scale, stop after 1.5 s below it.
+const SILENCE_ARGS = ['silence', '1', '0.1', '2%', '1', '1.5', '2%']
+// 16 kHz mono 16-bit: bytes per second of audio, after the 44-byte header.
+const WAV_BYTES_PER_SECOND = 32000
+const MIN_SPEECH_SECONDS = 0.6
 const MODEL_FILE = 'ggml-base.en.bin'
 
 // Bump a shape tag when a record's fields change: it declines what an earlier
@@ -29,6 +34,7 @@ const showCaptions = atom({ plugin: 'clausper', key: 'showCaptions' } as const, 
 const listenMode = atom({ plugin: 'clausper', key: 'listenMode' } as const, 'off')
 const isListening = atom({ plugin: 'clausper', key: 'isListening' } as const, false)
 const heard = atom({ plugin: 'clausper', key: 'heard' } as const, null)
+const lastListen = atom({ plugin: 'clausper', key: 'lastListen' } as const, null)
 
 // Bumped by stop: a sentence loop that sees another generation ends.
 let speakGeneration = 0
@@ -260,34 +266,51 @@ const listenOnce = async ($: $, options: { ask: boolean }) => {
   const wav = `/tmp/clausper-${Date.now()}.wav`
   try {
     if (options.ask) await speak($, 'What next?')
-    await update($, caption, () => 'Listening… speak, then pause. Say "cancel" to skip.')
     $.ui.status('Clausper: listening…')
 
-    // Wait for sound, stop after 1.6 s of quiet, never longer than RECORD_SECONDS.
-    const recorded = await $.process
-      .run(
-        [ears.recorder, '-q', '-r', '16000', '-c', '1', '-b', '16', wav,
-          'silence', '1', '0.15', '4%', '1', '1.6', '4%', 'trim', '0', String(RECORD_SECONDS)],
-        { timeoutMs: (RECORD_SECONDS + 10) * 1000 },
+    // Record: wait for sound, stop after a pause, never longer than RECORD_SECONDS.
+    // A capture shorter than a word is a false start (a click, a breath): try again.
+    let seconds = 0
+    let outcome = ''
+    for (let attempt = 1; attempt <= 3 && seconds < MIN_SPEECH_SECONDS; attempt += 1) {
+      await update($, caption, () =>
+        attempt === 1 ? 'Listening… speak, then pause. Say "cancel" to skip.' : 'Still listening… go ahead.',
       )
-      .catch(() => null)
-    if (recorded === null || !(await $.fs.exists(wav))) {
-      await speak($, "I didn't hear anything.")
+      void $.audio.play({ asset: 'assets/listen-start.wav' }).catch(() => undefined)
+      const recorded = await $.process
+        .run(
+          [ears.recorder, '-q', '-r', '16000', '-c', '1', '-b', '16', wav, ...SILENCE_ARGS, 'trim', '0', String(RECORD_SECONDS)],
+          { timeoutMs: (RECORD_SECONDS + 15) * 1000 },
+        )
+        .catch((error: unknown) => ({ exitCode: -1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))
+      const size = (await $.fs.exists(wav)) ? (await $.fs.stat(wav)).size : 0
+      seconds = Math.max(0, size - 44) / WAV_BYTES_PER_SECOND
+      outcome = `attempt ${attempt}: exit ${recorded.exitCode}, ${seconds.toFixed(1)} s of audio`
+      $.ui.log(`clausper: listen ${outcome} ${recorded.stderr.slice(0, 120)}`, { to: 'debug' })
+      if (recorded.exitCode === -1) break
+    }
+    void $.audio.play({ asset: 'assets/listen-stop.wav' }).catch(() => undefined)
+    if (seconds < MIN_SPEECH_SECONDS) {
+      await update($, lastListen, () => `Heard nothing above the noise floor (${outcome})`)
+      await speak($, "I didn't hear anything. Try /clausper listen and speak a little louder.")
       return
     }
 
-    await update($, caption, () => 'Transcribing…')
+    await update($, caption, () => `Heard ${seconds.toFixed(1)} seconds. Transcribing…`)
     const result = await $.process.run(
-      [ears.whisper, '-m', ears.model, '-f', wav, '-nt', '-np', '-l', 'en', '-t', '8'],
+      [ears.whisper, '-m', ears.model, '-f', wav, '-nt', '-np', '-nf', '-sns', '-l', 'en', '-t', '8'],
       { timeoutMs: 60000 },
     )
     const text = cleanTranscript(result.stdout)
     if (result.exitCode !== 0 || text === '') {
+      await update($, lastListen, () => `Recorded ${seconds.toFixed(1)} s but transcribed nothing (exit ${result.exitCode})`)
       $.ui.log(`clausper: transcription failed (${result.exitCode}): ${result.stderr.slice(0, 200)}`, { to: 'debug' })
-      await speak($, "I didn't catch that.")
+      await speak($, "I heard you, but I couldn't make out the words.")
       return
     }
+    await update($, lastListen, () => `Heard ${seconds.toFixed(1)} s: "${clip(text, 80)}"`)
     if (CANCEL.test(text)) {
+      await update($, lastListen, () => `Heard "${text}": skipped`)
       await speak($, 'Okay.')
       return
     }
@@ -610,6 +633,7 @@ export const register: Register = on => {
     const saying = await read($, caption)
     const ears = await read($, listenMode)
     const lastHeard = await read($, heard)
+    const listenNote = await read($, lastListen)
     const now = await $.clock.now()
     const width = Math.max(20, e.props.bodyColumns)
 
@@ -651,7 +675,12 @@ export const register: Register = on => {
             </Text>
           </Box>
         )}
-        {lastHeard !== null && !listening && (
+        {listenNote !== null && !listening && (
+          <Text dimColor wrap="wrap">
+            last listen: {listenNote}
+          </Text>
+        )}
+        {lastHeard !== null && !listening && listenNote === null && (
           <Text dimColor wrap="truncate-end">
             heard: {lastHeard}
           </Text>

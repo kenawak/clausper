@@ -183,6 +183,36 @@ test('subagent turns and empty answers are ignored', async ($, on) => {
   await ui.unmount()
 })
 
+test('listening records, transcribes, and submits the words as the prompt', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  const submitted: string[] = []
+  on('env.get', () => ({ value: '/home/ken' }))
+  on('fs.exists', () => ({ value: true }))
+  on('fs.stat', () => ({ value: { size: 44 + 32000 * 3, isFile: true, isDirectory: false, mtimeMs: 0 } }))
+  on('audio.play', () => ({ value: undefined }))
+  on('prompt.submit', (_, e) => {
+    submitted.push(e.text)
+    return { text: e.text }
+  })
+  on('process.run', (_, e) => {
+    const [cmd = ''] = e.argv
+    if (cmd === 'which') return { value: { exitCode: 0, stdout: `/opt/homebrew/bin/${e.argv[1]}\n`, stderr: '' } }
+    if (cmd.endsWith('whisper-cli')) return { value: { exitCode: 0, stdout: ' Add a readme file and commit it.\n', stderr: '' } }
+    return { value: { exitCode: 0, stdout: '', stderr: '' } }
+  })
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'clausper', args: 'listen auto', origin: { kind: 'composer' }, presentation: { isFullscreen: false } })
+  await $.command.run({ command: 'clausper', args: 'listen', origin: { kind: 'composer' }, presentation: { isFullscreen: false } })
+  await clock.advance(1)
+
+  expect(submitted).toEqual(['Add a readme file and commit it.'])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /last listen/ }))?.text).toContain('Heard 3.0 s')
+  await ui.unmount()
+})
+
 test('setup reports what listening needs, and listen mode is remembered', async ($, on) => {
   const spoken: string[] = []
   engine(on, spoken)
