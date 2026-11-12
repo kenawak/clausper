@@ -1,0 +1,10 @@
+{
+  "name": "clausper",
+  "version": "0.1.0",
+  "description": "Whispers a spoken summary of each Claude Code response and keeps a clickable list of what changed.",
+  "types": "./types/index.d.ts",
+  "license": "MIT",
+  "author": {
+    "name": "Ken"
+  }
+}
