@@ -31,8 +31,7 @@ claude plugin install clausper --marketplace kenawak/clausper
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins,
 Add marketplace with `kenawak/clausper`, then Add plugin.
 
-This repository is private: installing needs read access on GitHub and a git credential for
-github.com on your machine (an SSH key, or `gh auth login` then `gh auth setup-git`).
+Landing page: https://clausper.kenawak.dev
 
 ## Listen mode: answer by voice
 
