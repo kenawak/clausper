@@ -1,2 +1,0 @@
-# Railpack (Railway, Dokploy, Coolify): serve the landing page from site/ with Caddy.
-root: site

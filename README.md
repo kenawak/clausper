@@ -31,7 +31,7 @@ claude plugin install clausper --marketplace kenawak/clausper
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins,
 Add marketplace with `kenawak/clausper`, then Add plugin.
 
-Landing page: https://clausper.kenawak.dev
+Landing page: https://clausper.kenawak.dev (source: https://github.com/kenawak/clausper-site)
 
 ## Listen mode: answer by voice
 
@@ -69,7 +69,7 @@ In the pane, `m` mutes, `a` says the last summary again, `s` stops, `l` listens,
 The mod is a Claude Code hooks module: `hooks/register.tsx`, its state contract in
 `types/index.d.ts`, tests in `tests/`. Run it from this folder with
 `claude --plugin-dir .`, check it with `claude plugin validate .` and `claude plugin test .`.
-The landing page lives in `site/`.
+The landing page is its own repository: https://github.com/kenawak/clausper-site.
 
 ## Requirements
 
