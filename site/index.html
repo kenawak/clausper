@@ -7,219 +7,218 @@
 <title>Clausper</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-  /* Layout: a single dark terminal-black canvas; one lime accent; mono micro-labels; the demo is the hero. */
+  /* Layout: warm off-white canvas, one big rounded hero banner with a dusk gradient and a dark glass panel
+     (the Clausper pane) on its right; chip row; preview cards; a deliberate dark theme behind a toggle. */
   :root {
-    --bg: #0b0b0a;
-    --bg-2: #141413;
-    --bg-3: #1c1c1a;
-    --line: #26261f;
-    --fg: #f2efe6;
-    --fg-2: #a8a699;
-    --fg-3: #6f6e64;
-    --accent: #c9ff4f;
-    --accent-ink: #0b0b0a;
-    --accent-soft: rgba(201, 255, 79, 0.12);
-    --caption: #7fe3ff;
-    --listen: #7dffb0;
-    --warn: #ffd166;
+    --bg: #f4f1ec;
+    --surface: #ffffff;
+    --surface-2: #faf8f4;
+    --line: #e7e1d7;
+    --ink: #17161a;
+    --ink-2: #5f5b55;
+    --ink-3: #9a958c;
+    --accent: #ff6a3d;
+    --accent-ink: #ffffff;
+    --accent-soft: #ffe7dd;
+    --pill: #17161a;
+    --pill-ink: #ffffff;
+    --glass: rgba(20, 18, 24, 0.72);
+    --glass-line: rgba(255, 255, 255, 0.12);
+    --caption: #8fe6ff;
+    --listen: #9dffb8;
+    --warn: #b7791f;
+    --warn-soft: #fff1d6;
+    --sky-1: #f7c9a8; --sky-2: #e49ab0; --sky-3: #6f6bb3; --hill: #2a2f3f;
+    --shadow: 0 18px 50px -24px rgba(23, 22, 26, 0.35);
     --display: "Inter Tight", "Inter", system-ui, -apple-system, sans-serif;
     --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-    --radius-lg: 22px;
-    --radius-md: 14px;
-    --radius-pill: 999px;
+    --r-xl: 28px; --r-lg: 22px; --r-md: 16px; --r-pill: 999px;
     --gutter-l: max(16px, env(safe-area-inset-left, 0px));
     --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e0d10;
+    --surface: #17161b;
+    --surface-2: #1d1c22;
+    --line: #2a2830;
+    --ink: #f1eee8;
+    --ink-2: #aaa49b;
+    --ink-3: #6f6a64;
+    --accent: #ff7a4f;
+    --accent-ink: #17161a;
+    --accent-soft: #3a2219;
+    --pill: #f1eee8;
+    --pill-ink: #17161a;
+    --glass: rgba(10, 9, 12, 0.78);
+    --glass-line: rgba(255, 255, 255, 0.1);
+    --warn: #ffd27a;
+    --warn-soft: #332a14;
+    --sky-1: #3d2b4f; --sky-2: #7a3a5f; --sky-3: #1d2a55; --hill: #0a0c14;
+    --shadow: 0 18px 50px -24px rgba(0, 0, 0, 0.8);
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--fg);
-    font-family: var(--display);
-    font-size: 17px;
-    line-height: 1.55;
-    -webkit-font-smoothing: antialiased;
-  }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--display); font-size: 16.5px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
   a { color: inherit; text-decoration: none; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
-  .wrap {
-    max-width: 1120px;
-    margin: 0 auto;
-    padding-left: var(--gutter-l);
-    padding-right: var(--gutter-r);
-  }
-  .mono { font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-3); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding-left: var(--gutter-l); padding-right: var(--gutter-r); }
+  .mono { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; }
   .ic { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
-  /* Nav */
-  .nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 22px; }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: -0.03em; font-size: 20px; }
-  .brand .mark {
-    width: 32px; height: 32px; border-radius: 10px; background: var(--accent); color: var(--accent-ink);
-    display: grid; place-items: center;
+  /* Top bar */
+  .top { display: flex; align-items: center; gap: 14px; padding-block: 18px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: -0.03em; font-size: 21px; }
+  .brand .mark { width: 30px; height: 30px; border-radius: 9px; background: var(--ink); color: var(--bg); display: grid; place-items: center; }
+  .brand .mark .ic { width: 16px; height: 16px; stroke-width: 2.4; }
+  .searchish {
+    flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 520px; margin: 0 auto;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 8px 8px 8px 16px;
+    font-family: var(--mono); font-size: 13px; color: var(--ink-2);
   }
-  .brand .mark .ic { width: 18px; height: 18px; stroke-width: 2.4; }
-  .links { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-  .links a {
-    font-family: var(--mono); font-size: 13px; color: var(--fg-2);
-    padding: 8px 14px; border-radius: var(--radius-pill); border: 1px solid transparent;
-  }
-  .links a:hover { color: var(--fg); border-color: var(--line); background: var(--bg-2); }
-
-  /* Hero */
-  .hero { padding-block: 56px 28px; display: grid; gap: 28px; }
-  .eyebrow { display: inline-flex; align-items: center; gap: 8px; }
-  .eyebrow .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 var(--accent-soft); animation: pulse 2.2s infinite; }
-  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(201,255,79,.45); } 70% { box-shadow: 0 0 0 10px rgba(201,255,79,0); } 100% { box-shadow: 0 0 0 0 rgba(201,255,79,0); } }
-  h1 {
-    margin: 0; font-size: clamp(40px, 7vw, 84px); line-height: 0.98; font-weight: 800;
-    letter-spacing: -0.045em; text-wrap: balance; max-width: 14ch;
-  }
-  h1 em { font-style: normal; color: var(--accent); }
-  .lede { margin: 0; max-width: 58ch; color: var(--fg-2); font-size: clamp(17px, 1.6vw, 21px); line-height: 1.5; }
-  .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-  .install {
-    display: inline-flex; align-items: center; gap: 12px; min-width: 0; max-width: 100%;
-    background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-pill);
-    padding: 10px 10px 10px 18px; font-family: var(--mono); font-size: 14px; color: var(--fg);
-  }
-  .install code { overflow-x: auto; white-space: nowrap; min-width: 0; scrollbar-width: none; }
-  .install code::-webkit-scrollbar { display: none; }
-  .install code .dim { color: var(--fg-3); }
-  .btn {
-    display: inline-flex; align-items: center; gap: 8px; border: 0; cursor: pointer;
-    font: inherit; font-weight: 700; letter-spacing: -0.01em; font-size: 15px;
-    padding: 10px 16px; border-radius: var(--radius-pill); transition: transform .08s ease, background .15s ease;
-  }
+  .searchish code { min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; color: var(--ink); }
+  .searchish code::-webkit-scrollbar { display: none; }
+  .searchish code .dim { color: var(--ink-3); }
+  .top-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; border: 0; cursor: pointer; font: inherit; font-weight: 700; font-size: 14px; padding: 9px 15px; border-radius: var(--r-pill); transition: transform .08s ease, background .15s ease, color .15s ease; white-space: nowrap; }
   .btn:active { transform: scale(0.97); }
+  .btn-dark { background: var(--pill); color: var(--pill-ink); }
+  .btn-dark:hover { opacity: .9; }
+  .btn-light { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+  .btn-light:hover { background: var(--surface-2); }
   .btn-accent { background: var(--accent); color: var(--accent-ink); }
-  .btn-accent:hover { background: #d8ff7a; }
-  .btn-ghost { background: transparent; color: var(--fg-2); border: 1px solid var(--line); }
-  .btn-ghost:hover { color: var(--fg); background: var(--bg-2); }
-  .btn.copied { background: var(--listen); }
+  .btn-accent:hover { filter: brightness(1.05); }
+  .btn.copied { background: #1f9d55; color: #fff; }
+  .icon-btn { width: 38px; height: 38px; padding: 0; justify-content: center; border-radius: 50%; }
 
-  /* Demo */
-  .demo {
-    margin-top: 18px; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 14px;
-    background: radial-gradient(1200px 400px at 20% 0%, rgba(201,255,79,.07), transparent 60%);
-    padding: 14px; border-radius: var(--radius-lg); border: 1px solid var(--line);
+  /* Chip row */
+  .chips { display: flex; gap: 8px; overflow-x: auto; padding-block: 6px 16px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; font-family: var(--mono); font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 7px 13px; }
+  .chip.on { background: var(--pill); color: var(--pill-ink); border-color: var(--pill); }
+  .chip:hover:not(.on) { background: var(--surface-2); }
+
+  /* Hero banner */
+  .banner {
+    position: relative; overflow: hidden; border-radius: var(--r-xl); min-height: 520px;
+    background:
+      radial-gradient(900px 300px at 50% 115%, var(--hill) 0 42%, transparent 43%),
+      radial-gradient(700px 260px at 80% 100%, color-mix(in oklab, var(--hill) 85%, var(--sky-3)) 0 40%, transparent 41%),
+      radial-gradient(1200px 500px at 20% -10%, var(--sky-1), transparent 60%),
+      linear-gradient(180deg, var(--sky-1) 0%, var(--sky-2) 45%, var(--sky-3) 100%);
+    box-shadow: var(--shadow);
+    display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; align-items: end;
+    padding: 28px; color: #fff;
   }
-  .term, .pane {
-    background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-md);
-    font-family: var(--mono); font-size: 13.5px; line-height: 1.65; min-width: 0; overflow: hidden;
+  .banner::before { content: ""; position: absolute; inset: 0; background: radial-gradient(60% 50% at 50% 100%, rgba(0,0,0,.35), transparent 70%); pointer-events: none; }
+  .banner > * { position: relative; }
+  .hero-copy { display: grid; gap: 16px; align-content: end; padding-bottom: 6px; }
+  .tag { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.25); color: #fff; border-radius: var(--r-pill); padding: 6px 12px; width: max-content; backdrop-filter: blur(8px); }
+  .tag .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--listen); box-shadow: 0 0 0 0 rgba(157,255,184,.6); animation: pulse 2.2s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(157,255,184,.55); } 70% { box-shadow: 0 0 0 9px rgba(157,255,184,0); } 100% { box-shadow: 0 0 0 0 rgba(157,255,184,0); } }
+  h1 { margin: 0; font-size: clamp(38px, 6vw, 72px); line-height: 1; font-weight: 800; letter-spacing: -0.045em; text-wrap: balance; max-width: 14ch; text-shadow: 0 2px 24px rgba(0,0,0,.25); }
+  h1 em { font-style: normal; color: var(--listen); }
+  .lede { margin: 0; max-width: 52ch; font-size: clamp(16px, 1.4vw, 19px); color: rgba(255,255,255,.88); }
+  .meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; color: rgba(255,255,255,.85); }
+  .meta .pill { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.22); border-radius: var(--r-pill); padding: 5px 11px; display: inline-flex; align-items: center; gap: 6px; }
+  .meta .pill .ic { width: 14px; height: 14px; }
+  .hero-cta { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  /* Glass pane in the banner */
+  .glass {
+    background: var(--glass); border: 1px solid var(--glass-line); border-radius: var(--r-lg); backdrop-filter: blur(14px);
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.6; color: #eee; padding: 16px; display: grid; gap: 10px; align-self: stretch; min-width: 0;
   }
-  .bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--fg-3); font-size: 12px; }
-  .bar .dots { display: flex; gap: 6px; }
-  .bar .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--bg-3); display: block; }
-  .term .body, .pane .body { padding: 14px 16px; display: grid; gap: 10px; }
-  .row { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
-  .row > span:first-child { color: var(--fg-3); flex: none; width: 14px; }
-  .you { color: var(--fg); }
-  .claude { color: var(--fg-2); }
-  .claude .more { color: var(--fg-3); }
-  .fold { color: var(--fg-3); font-size: 12px; }
-  .caption {
-    margin-top: 6px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-    padding: 10px 12px; border-radius: 10px; background: var(--bg-3); border: 1px solid var(--line);
-  }
-  .caption .who { color: var(--fg-3); font-size: 12px; }
-  .caption .say { color: var(--caption); font-style: italic; min-width: 0; }
-  .caption .say.listen { color: var(--listen); }
-  .caption .stop { margin-left: auto; color: var(--fg-3); font-size: 12px; }
-  .wave { display: inline-flex; gap: 3px; align-items: flex-end; height: 14px; }
+  .glass .gh { display: flex; justify-content: space-between; gap: 8px; color: rgba(255,255,255,.6); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+  .glass .gh b { color: #fff; display: inline-flex; align-items: center; gap: 6px; }
+  .glass .gh b i { width: 6px; height: 6px; border-radius: 50%; background: var(--listen); display: inline-block; }
+  .say { padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.08); display: grid; gap: 4px; }
+  .say .who { color: rgba(255,255,255,.55); font-size: 11px; }
+  .say .txt { color: var(--caption); font-style: italic; }
+  .say .txt.l { color: var(--listen); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .wave { display: inline-flex; gap: 3px; align-items: flex-end; height: 12px; }
   .wave i { width: 3px; background: var(--listen); border-radius: 2px; animation: wave 1s infinite ease-in-out; display: block; }
-  .wave i:nth-child(1) { height: 6px; animation-delay: 0s; } .wave i:nth-child(2) { height: 12px; animation-delay: .15s; }
-  .wave i:nth-child(3) { height: 9px; animation-delay: .3s; } .wave i:nth-child(4) { height: 14px; animation-delay: .45s; } .wave i:nth-child(5) { height: 7px; animation-delay: .6s; }
-  @keyframes wave { 0%, 100% { transform: scaleY(0.5); } 50% { transform: scaleY(1.15); } }
-  .prompt { color: var(--fg-3); padding-top: 4px; border-top: 1px dashed var(--line); }
-  .prompt b { color: var(--accent); font-weight: 500; }
-  .pane .head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
-  .pane .head b { color: var(--fg); font-weight: 700; }
-  .pane .head span { color: var(--fg-3); font-size: 12px; }
-  .pane .ctl { display: flex; gap: 6px; flex-wrap: wrap; }
-  .pane .ctl span { font-size: 12px; color: var(--fg-2); border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 2px 10px; }
-  .pane .ctl span u { text-decoration: none; color: var(--accent); }
-  .turn { display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; }
-  .turn.sel { background: var(--bg-3); }
-  .turn .t { display: flex; gap: 8px; color: var(--fg); min-width: 0; }
-  .turn .t .mark { color: var(--accent); flex: none; }
-  .turn .t .ago { color: var(--fg-3); margin-left: auto; flex: none; }
-  .turn .t .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .turn .c { color: var(--fg-3); font-size: 12px; padding-left: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .files { display: grid; gap: 4px; padding-left: 10px; }
-  .files span { color: var(--fg-2); font-size: 12.5px; }
+  .wave i:nth-child(1){height:5px} .wave i:nth-child(2){height:11px;animation-delay:.15s} .wave i:nth-child(3){height:8px;animation-delay:.3s} .wave i:nth-child(4){height:12px;animation-delay:.45s} .wave i:nth-child(5){height:6px;animation-delay:.6s}
+  @keyframes wave { 0%,100% { transform: scaleY(.5); } 50% { transform: scaleY(1.15); } }
+  .turns { display: grid; gap: 2px; }
+  .turn { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; padding: 7px 8px; border-radius: 10px; align-items: baseline; }
+  .turn.sel { background: rgba(255,255,255,.08); }
+  .turn .t { color: rgba(255,255,255,.5); font-size: 11px; }
+  .turn .n { color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .turn .n small { display: block; color: rgba(255,255,255,.55); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .turn .c { color: rgba(255,255,255,.55); font-size: 11px; }
+  .files { display: grid; gap: 3px; padding: 2px 8px 6px 52px; }
+  .files span { color: rgba(255,255,255,.8); font-size: 12px; }
   .files span b { color: var(--warn); font-weight: 500; margin-right: 8px; }
-  .files span i { color: var(--fg-3); font-style: normal; margin-left: 8px; }
-  .files span.sel { color: var(--fg); }
+  .files span i { color: rgba(255,255,255,.45); font-style: normal; margin-left: 8px; }
 
   /* Sections */
-  section { padding-block: 72px 8px; }
-  .sec-head { display: grid; gap: 10px; margin-bottom: 28px; }
-  h2 { margin: 0; font-size: clamp(30px, 4vw, 44px); font-weight: 800; letter-spacing: -0.04em; line-height: 1.05; text-wrap: balance; max-width: 22ch; }
-  h2 em { font-style: normal; color: var(--accent); }
-  .sub { margin: 0; color: var(--fg-2); max-width: 60ch; }
-  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-  .card {
-    background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-lg);
-    padding: 22px; display: grid; gap: 12px; align-content: start; min-width: 0;
-  }
-  .card .icon {
-    width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
-    background: var(--accent-soft); color: var(--accent);
-  }
-  .card h3 { margin: 0; font-size: 19px; letter-spacing: -0.02em; font-weight: 700; }
-  .card p { margin: 0; color: var(--fg-2); font-size: 15.5px; }
-  .card .tag { font-family: var(--mono); font-size: 11.5px; color: var(--fg-3); letter-spacing: .06em; text-transform: uppercase; }
+  section { padding-block: 56px 4px; }
+  .sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+  h2 { margin: 0; font-size: clamp(24px, 3vw, 32px); font-weight: 800; letter-spacing: -0.035em; line-height: 1.1; }
+  h2 small { font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-left: 10px; font-weight: 500; }
+  .sec-head a { font-size: 14px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
+  .sub { margin: 0 0 22px; color: var(--ink-2); max-width: 62ch; }
+
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; display: grid; grid-template-rows: auto 1fr; min-width: 0; transition: transform .15s ease, box-shadow .15s ease; }
+  .card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+  .card .shot { position: relative; background: var(--surface-2); border-bottom: 1px solid var(--line); padding: 16px; min-height: 150px; display: grid; align-content: end; }
+  .card .shot .lvl { position: absolute; top: 12px; left: 12px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 4px 9px; color: var(--ink-2); }
+  .term { background: #141318; color: #e9e6df; border-radius: 12px; padding: 12px 14px; font-family: var(--mono); font-size: 12px; line-height: 1.6; display: grid; gap: 4px; box-shadow: 0 10px 30px -18px rgba(0,0,0,.6); }
+  .term .d { color: #7f7b74; }
+  .term .c { color: var(--caption); font-style: italic; }
+  .term .g { color: var(--listen); }
+  .term .y { color: #ffd27a; }
+  .term .o { color: #ff9a76; }
+  .card .body { padding: 18px; display: grid; gap: 8px; align-content: start; }
+  .card h3 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; display: flex; align-items: center; gap: 10px; }
+  .card h3 .ic { color: var(--accent); }
+  .card p { margin: 0; color: var(--ink-2); font-size: 15px; }
+  .card .foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
 
   /* Steps */
-  .steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; counter-reset: step; }
-  .step { position: relative; padding: 22px; border-radius: var(--radius-lg); border: 1px solid var(--line); background: var(--bg-2); display: grid; gap: 10px; min-width: 0; }
+  .steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  .step { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px; display: grid; gap: 8px; min-width: 0; }
   .step .n { font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: .08em; }
-  .step h3 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
-  .step p { margin: 0; color: var(--fg-2); font-size: 15px; }
-  .step .ms { font-family: var(--mono); font-size: 12px; color: var(--fg-3); }
+  .step h3 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+  .step p { margin: 0; color: var(--ink-2); font-size: 14.5px; }
+  .step .ms { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
 
   /* Install */
-  .install-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 14px; }
-  .code {
-    background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-md);
-    font-family: var(--mono); font-size: 13.5px; line-height: 1.7; padding: 16px 18px; overflow-x: auto; min-width: 0;
-  }
-  .code .c { color: var(--fg-3); }
-  .code .k { color: var(--accent); }
+  .install { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; }
+  .code { background: #141318; color: #e9e6df; border-radius: var(--r-lg); font-family: var(--mono); font-size: 13px; line-height: 1.75; padding: 18px 20px; overflow-x: auto; min-width: 0; }
   .code pre { margin: 0; white-space: pre; }
-  .cmds { display: grid; gap: 0; border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; background: var(--bg-2); }
-  .cmds .r { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 12px; padding: 11px 16px; border-top: 1px solid var(--line); font-size: 14.5px; }
+  .code .cm { color: #7f7b74; } .code .k { color: var(--listen); }
+  .cmds { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+  .cmds .r { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 12px; padding: 11px 16px; border-top: 1px solid var(--line); font-size: 14.5px; }
   .cmds .r:first-child { border-top: 0; }
-  .cmds code { font-family: var(--mono); font-size: 13px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .cmds span { color: var(--fg-2); }
-  .note { display: flex; gap: 10px; align-items: flex-start; color: var(--fg-2); font-size: 15px; margin-top: 14px; }
-  .note .ic { color: var(--warn); margin-top: 3px; }
+  .cmds code { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cmds span { color: var(--ink-2); }
+  .note { display: flex; gap: 10px; align-items: flex-start; background: var(--warn-soft); color: var(--ink); border-radius: var(--r-md); padding: 12px 14px; font-size: 14.5px; margin-top: 14px; }
+  .note .ic { color: var(--warn); margin-top: 2px; }
 
-  /* Footer */
-  footer { padding-block: 60px 40px; color: var(--fg-3); font-size: 14px; }
+  footer { padding-block: 56px 40px; color: var(--ink-3); font-size: 14px; }
   footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
-  footer .links a { font-size: 13px; }
+  footer a { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
 
-  @media (max-width: 900px) {
-    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 960px) {
+    .banner { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+    .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .demo, .install-grid { grid-template-columns: minmax(0, 1fr); }
+    .install { grid-template-columns: minmax(0, 1fr); }
+    .searchish { display: none; }
   }
-  @media (max-width: 560px) {
-    .grid, .steps { grid-template-columns: minmax(0, 1fr); }
-    .nav .links a:not(.gh) { display: none; }
-    .hero { padding-block: 36px 20px; }
-    section { padding-block: 52px 6px; }
+  @media (max-width: 600px) {
+    .cards, .steps { grid-template-columns: minmax(0, 1fr); }
+    .banner { padding: 18px; border-radius: 22px; }
     .cmds .r { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    .top .btn-light span { display: none; }
+    section { padding-block: 44px 4px; }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .eyebrow .dot, .wave i { animation: none; }
-    .btn { transition: none; }
-  }
+  @media (prefers-reduced-motion: reduce) { .tag .dot, .wave i { animation: none; } .card, .btn { transition: none; } }
 </style>
 </head>
 <body>
@@ -237,133 +236,121 @@
   <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
   <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 13.5A8.5 8.5 0 0 1 10.5 3a7 7 0 1 0 10.5 10.5z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M2 19h20"/></symbol>
 </svg>
 
-<header class="wrap nav">
-  <a class="brand" href="#top" aria-label="Clausper">
-    <span class="mark"><svg class="ic"><use href="#i-waves"/></svg></span>
-    Clausper
-  </a>
-  <nav class="links" aria-label="Sections">
-    <a href="#how">How it works</a>
-    <a href="#features">Features</a>
-    <a href="#install">Install</a>
-    <a class="gh" href="https://github.com/kenawak/clausper" rel="noopener">GitHub</a>
-  </nav>
+<header class="wrap top">
+  <a class="brand" href="#top" aria-label="Clausper"><span class="mark"><svg class="ic"><use href="#i-waves"/></svg></span>Clausper</a>
+  <div class="searchish" aria-label="Install command">
+    <code><span class="dim">/</span>plugin install clausper <span class="dim">--marketplace</span> kenawak/clausper</code>
+    <button class="btn btn-dark" type="button" data-copy="/plugin install clausper --marketplace kenawak/clausper"><svg class="ic"><use href="#i-copy"/></svg> Copy</button>
+  </div>
+  <div class="top-actions">
+    <a class="btn btn-light" href="#how"><svg class="ic"><use href="#i-info"/></svg><span>How it works</span></a>
+    <button class="btn btn-light icon-btn" id="theme" type="button" aria-label="Switch theme" title="Switch theme"><svg class="ic" id="theme-icon"><use href="#i-moon"/></svg></button>
+    <a class="btn btn-dark" href="https://github.com/kenawak/clausper" rel="noopener"><svg class="ic"><use href="#i-github"/></svg> GitHub</a>
+  </div>
 </header>
 
-<main id="top">
-  <div class="wrap hero">
-    <span class="eyebrow mono"><span class="dot"></span> A voice mod for Claude Code</span>
-    <h1>Hear what Claude did. <em>Say what's next.</em></h1>
-    <p class="lede">
-      Clausper speaks a short summary after every reply, captions it as it talks, keeps a clickable list
-      of the files Claude touched, and listens for your next prompt. It runs on your Claude subscription.
-      Your voice never leaves your Mac.
-    </p>
-    <div class="cta">
-      <div class="install" id="install-line">
-        <code><span class="dim">/</span>plugin install clausper <span class="dim">--marketplace</span> kenawak/clausper</code>
-        <button class="btn btn-accent" id="copy-install" type="button" data-copy="/plugin install clausper --marketplace kenawak/clausper">
-          <svg class="ic"><use href="#i-copy"/></svg> Copy
-        </button>
-      </div>
-      <a class="btn btn-ghost" href="#how">See how it works <svg class="ic"><use href="#i-arrow"/></svg></a>
-    </div>
+<main id="top" class="wrap">
+  <nav class="chips" aria-label="Jump to">
+    <a class="chip on" href="#top">All</a>
+    <a class="chip" href="#features">Speak</a>
+    <a class="chip" href="#features">Captions</a>
+    <a class="chip" href="#features">Changes</a>
+    <a class="chip" href="#features">Listen</a>
+    <a class="chip" href="#how">How it works</a>
+    <a class="chip" href="#install">Install</a>
+    <a class="chip" href="#install">macOS</a>
+    <a class="chip" href="#features">Private</a>
+  </nav>
 
-    <div class="demo" aria-label="What a Clausper session looks like">
-      <div class="term">
-        <div class="bar"><span class="dots"><i></i><i></i><i></i></span> claude · ~/work/shop</div>
-        <div class="body">
-          <div class="row you"><span>›</span><div>fix the login redirect bug</div></div>
-          <div class="row claude"><span>⏺</span><div>Found it in <span class="more">auth.ts</span>: the redirect ran before the session cookie was written, so the first request after sign-in had no session. I moved the redirect into the cookie callback and added a regression test. <span class="more">… 38 more lines</span></div></div>
-          <div class="caption">
-            <span class="who">Clausper</span>
-            <span class="say">Fixed the login redirect bug. Two files changed and the tests pass.</span>
-            <span class="stop">stop</span>
-          </div>
-          <div class="caption">
-            <span class="who">Clausper</span>
-            <span class="say listen">What next?</span>
-            <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-            <span class="stop">listening</span>
-          </div>
-          <div class="prompt">› <b>▍</b> <span class="fold">your voice becomes the next prompt</span></div>
-        </div>
+  <div class="banner" aria-label="Clausper in one picture">
+    <div class="hero-copy">
+      <span class="tag mono"><span class="dot"></span> Voice mod for Claude Code</span>
+      <h1>Hear what Claude did. <em>Say what's next.</em></h1>
+      <p class="lede">Clausper speaks a short summary after every reply, captions it as it talks, keeps a clickable list of the files Claude touched, and listens for your next prompt.</p>
+      <div class="meta">
+        <span class="pill"><svg class="ic"><use href="#i-key"/></svg> runs on your subscription</span>
+        <span class="pill"><svg class="ic"><use href="#i-lock"/></svg> voice stays on your Mac</span>
+        <span class="pill"><svg class="ic"><use href="#i-clock"/></svg> speaks in about a second</span>
       </div>
-      <aside class="pane">
-        <div class="bar">Clausper</div>
-        <div class="body">
-          <div class="head"><b>Clausper</b> <span>ready · ears auto</span></div>
-          <div class="ctl"><span><u>m</u> mute</span><span><u>a</u> say again</span><span><u>s</u> stop</span><span><u>l</u> listen</span></div>
-          <div class="turn sel">
-            <div class="t"><span class="mark">•</span><span class="name">Fixed the login redirect bug</span><span class="ago">2s</span></div>
-            <div class="files">
-              <span class="sel"><b>±</b>auth.ts<i>diff · open · copy</i></span>
-              <span><b>+</b>auth.test.ts</span>
-              <span><b>$</b>Run the auth tests</span>
-            </div>
-          </div>
-          <div class="turn">
-            <div class="t"><span class="mark">•</span><span class="name">Added rate limiting to the API</span><span class="ago">4m</span></div>
-            <div class="c">3 changes: limiter.ts, server.ts, README.md</div>
-          </div>
-          <div class="turn">
-            <div class="t"><span class="mark">~</span><span class="name">Explained the deploy failure</span><span class="ago">11m</span></div>
-            <div class="c">no changes</div>
-          </div>
-        </div>
-      </aside>
+      <div class="hero-cta">
+        <button class="btn btn-accent" type="button" data-copy="/plugin install clausper --marketplace kenawak/clausper"><svg class="ic"><use href="#i-copy"/></svg> Copy install line</button>
+        <a class="btn btn-light" href="#install">Set up listening <svg class="ic"><use href="#i-arrow"/></svg></a>
+      </div>
     </div>
+    <aside class="glass" aria-label="The Clausper pane">
+      <div class="gh"><b><i></i> Clausper</b><span>ready · ears auto</span></div>
+      <div class="say"><span class="who">Clausper · caption</span><span class="txt">Fixed the login redirect bug. Two files changed and the tests pass.</span></div>
+      <div class="say"><span class="who">Clausper · listening</span><span class="txt l">What next? <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></span></div>
+      <div class="turns">
+        <div class="turn sel"><span class="t">2s</span><span class="n">Fixed the login redirect bug</span><span class="c">3 changes</span></div>
+        <div class="files"><span><b>±</b>auth.ts<i>diff · open · copy</i></span><span><b>+</b>auth.test.ts</span><span><b>$</b>Run the auth tests</span></div>
+        <div class="turn"><span class="t">4m</span><span class="n">Added rate limiting to the API<small>limiter.ts, server.ts, README.md</small></span><span class="c">3 changes</span></div>
+        <div class="turn"><span class="t">11m</span><span class="n">Explained the deploy failure<small>no changes</small></span><span class="c"></span></div>
+      </div>
+    </aside>
   </div>
 
-  <section id="how" class="wrap">
-    <div class="sec-head">
-      <span class="mono">How it works</span>
-      <h2>Claude finishes. Clausper <em>starts talking</em> before you've looked up.</h2>
-      <p class="sub">Every reply goes through the same four beats. The order matters, so they're numbered.</p>
+  <section id="features">
+    <div class="sec-head"><h2>What Clausper does <small>5 things</small></h2><a href="#install">Install <svg class="ic"><use href="#i-arrow"/></svg></a></div>
+    <div class="cards">
+      <article class="card">
+        <div class="shot"><span class="lvl">Speak</span><div class="term"><span class="d">⏺ Found it in auth.ts: the redirect ran before… <span class="d">38 more lines</span></span><span class="c">Fixed the login redirect bug. Two files changed and the tests pass.</span></div></div>
+        <div class="body"><h3><svg class="ic"><use href="#i-volume"/></svg>Spoken summary</h3><p>Two or three sentences on what was done and how it turned out, written for the ear. The opening line plays while Haiku writes the rest.</p><div class="foot">macOS system voice · any voice you have installed</div></div>
+      </article>
+      <article class="card">
+        <div class="shot"><span class="lvl">Captions</span><div class="term"><span class="d">Clausper</span><span class="c">Validation passes and all six tests pass.</span><span class="d">› <span class="y">▍</span></span></div></div>
+        <div class="body"><h3><svg class="ic"><use href="#i-captions"/></svg>Live captions</h3><p>The sentence being spoken shows above the prompt and in the pane, in step with the voice. One command turns them off.</p><div class="foot">/clausper captions on · off</div></div>
+      </article>
+      <article class="card">
+        <div class="shot"><span class="lvl">Changes</span><div class="term"><span>• Fixed the login redirect bug <span class="d">2s</span></span><span class="y">  ± auth.ts <span class="d">×2</span></span><span class="y">  + auth.test.ts</span><span class="y">  $ Run the auth tests</span></div></div>
+        <div class="body"><h3><svg class="ic"><use href="#i-diff"/></svg>What changed, clickable</h3><p>Every file Claude edited or wrote and every command it ran. Press one for its diff, open it in your editor, or copy its path.</p><div class="foot">git diff · open · copy</div></div>
+      </article>
+      <article class="card">
+        <div class="shot"><span class="lvl">Listen</span><div class="term"><span class="g">What next?  ▂▅▃▇▂  listening</span><span class="d">heard 3.9 s → “add a readme and commit it”</span><span>› <span class="o">add a readme and commit it</span></span></div></div>
+        <div class="body"><h3><svg class="ic"><use href="#i-mic"/></svg>Listen mode</h3><p>Hands-free. Clausper asks what's next, stops at your pause, transcribes on your Mac, and sends your words as the prompt. Say “cancel” to skip.</p><div class="foot">sox + whisper.cpp · nothing uploaded</div></div>
+      </article>
+      <article class="card">
+        <div class="shot"><span class="lvl">Billing</span><div class="term"><span class="d">$.model.complete({ model: "haiku" })</span><span>summary in <span class="g">1.4 s</span> · on your subscription</span><span class="d">no API key · no extra account</span></div></div>
+        <div class="body"><h3><svg class="ic"><use href="#i-key"/></svg>No API key</h3><p>Summaries come from Haiku through your own Claude Code session, so they run on the plan you already pay for.</p><div class="foot">Claude Code mod · hooks module</div></div>
+      </article>
+      <article class="card">
+        <div class="shot"><span class="lvl">Private</span><div class="term"><span class="g">rec</span> <span class="d">→ 16 kHz wav, local</span><span class="g">whisper-cli</span> <span class="d">→ text, local, 0.3 s</span><span class="d">network calls added: <span class="g">0</span></span></div></div>
+        <div class="body"><h3><svg class="ic"><use href="#i-lock"/></svg>Private by design</h3><p>Recording and transcription happen on your machine. The only network call is the one Claude Code already makes.</p><div class="foot">MIT · source on GitHub</div></div>
+      </article>
     </div>
+  </section>
+
+  <section id="how">
+    <div class="sec-head"><h2>How a turn sounds <small>4 beats, in order</small></h2></div>
     <div class="steps">
-      <div class="step"><span class="n">01</span><h3>The turn ends</h3><p>A hook sees the reply the moment Claude stops. Short replies are spoken as they are, with no wait at all.</p><span class="ms">0 ms</span></div>
-      <div class="step"><span class="n">02</span><h3>The opening line is spoken</h3><p>For long replies, Clausper reads the first sentence at once while Haiku writes a two-sentence summary through your own session.</p><span class="ms">≈ 1–2 s</span></div>
-      <div class="step"><span class="n">03</span><h3>The summary and the ask</h3><p>You hear what changed and what needs your decision. The spoken sentence shows as a caption above the prompt.</p><span class="ms">sentence by sentence</span></div>
-      <div class="step"><span class="n">04</span><h3>“What next?”</h3><p>Clausper listens, stops at your pause, transcribes on your Mac, and sends your words as the next prompt.</p><span class="ms">≈ 0.3 s to transcribe</span></div>
+      <div class="step"><span class="n">01</span><h3>The turn ends</h3><p>A hook sees the reply the moment Claude stops. Short replies are spoken as they are, with no wait.</p><span class="ms">0 ms</span></div>
+      <div class="step"><span class="n">02</span><h3>The opening line plays</h3><p>For long replies, Clausper reads the first sentence at once while Haiku writes a two-sentence summary through your session.</p><span class="ms">≈ 1–2 s</span></div>
+      <div class="step"><span class="n">03</span><h3>The summary and the ask</h3><p>You hear what changed and what needs your decision. Each sentence shows as a caption while it plays.</p><span class="ms">sentence by sentence</span></div>
+      <div class="step"><span class="n">04</span><h3>“What next?”</h3><p>A short beep, then Clausper listens, stops at your pause, transcribes locally, and sends your words as the next prompt.</p><span class="ms">≈ 0.3 s to transcribe</span></div>
     </div>
   </section>
 
-  <section id="features" class="wrap">
-    <div class="sec-head">
-      <span class="mono">Features</span>
-      <h2>Built for people who'd rather <em>listen than read</em> 150 lines.</h2>
-    </div>
-    <div class="grid">
-      <div class="card"><div class="icon"><svg class="ic"><use href="#i-volume"/></svg></div><h3>Spoken summary</h3><p>Two or three sentences on what was done and how it turned out, written for the ear. File names are said in words.</p><span class="tag">macOS system voice</span></div>
-      <div class="card"><div class="icon"><svg class="ic"><use href="#i-captions"/></svg></div><h3>Live captions</h3><p>The sentence being spoken shows above the prompt and in the pane, in sync with the voice. Turn them off with one command.</p><span class="tag">/clausper captions</span></div>
-      <div class="card"><div class="icon"><svg class="ic"><use href="#i-diff"/></svg></div><h3>What changed, clickable</h3><p>Every file Claude edited or wrote, and every command it ran. Press one to see its diff, open it in your editor, or copy its path.</p><span class="tag">git diff · open · copy</span></div>
-      <div class="card"><div class="icon"><svg class="ic"><use href="#i-mic"/></svg></div><h3>Listen mode</h3><p>Hands-free. Say “cancel” to skip a turn, or use fill mode to put your words in the prompt box and check them before sending.</p><span class="tag">sox + whisper.cpp, local</span></div>
-      <div class="card"><div class="icon"><svg class="ic"><use href="#i-key"/></svg></div><h3>No API key</h3><p>Summaries come from Haiku through your Claude Code session, so they run on the subscription you already pay for.</p><span class="tag">$.model.complete</span></div>
-      <div class="card"><div class="icon"><svg class="ic"><use href="#i-lock"/></svg></div><h3>Private by design</h3><p>Recording and transcription happen on your machine. The only network call is the one Claude Code already makes.</p><span class="tag">nothing uploaded</span></div>
-    </div>
-  </section>
-
-  <section id="install" class="wrap">
-    <div class="sec-head">
-      <span class="mono">Install</span>
-      <h2>One line in Claude Code. <em>Two more</em> if you want to talk back.</h2>
-      <p class="sub">Clausper is a Claude Code mod. The repository is private for now, so you need access on GitHub and a git credential on your machine.</p>
-    </div>
-    <div class="install-grid">
+  <section id="install">
+    <div class="sec-head"><h2>Install <small>one line, two more for voice input</small></h2></div>
+    <p class="sub">Clausper is a Claude Code mod. The repository is private for now, so you need access on GitHub and a git credential for github.com on your machine.</p>
+    <div class="install">
       <div>
-        <div class="code"><pre><span class="c"># at the Claude Code prompt</span>
+        <div class="code"><pre><span class="cm"># at the Claude Code prompt</span>
 <span class="k">/plugin install</span> clausper --marketplace kenawak/clausper
 
-<span class="c"># listen mode (optional): recorder, transcriber, model</span>
+<span class="cm"># listen mode (optional): recorder, transcriber, model</span>
 brew install sox whisper-cpp
 mkdir -p ~/.clausper/models
 curl -L -o ~/.clausper/models/ggml-base.en.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 
-<span class="c"># then, back in Claude Code</span>
+<span class="cm"># then, back in Claude Code</span>
 <span class="k">/clausper</span> setup
 <span class="k">/clausper</span> listen auto</pre></div>
         <div class="note"><svg class="ic"><use href="#i-info"/></svg><span>macOS asks for microphone access the first time Clausper listens. Allow it for your terminal app. Speech needs macOS; the pane and captions work anywhere Claude Code runs.</span></div>
@@ -385,35 +372,50 @@ curl -L -o ~/.clausper/models/ggml-base.en.bin \
 
 <footer>
   <div class="wrap">
-    <span>Clausper · MIT · made for Claude Code</span>
-    <nav class="links" aria-label="Footer">
-      <a href="https://github.com/kenawak/clausper" rel="noopener"><svg class="ic" style="width:14px;height:14px;vertical-align:-2px;margin-right:6px"><use href="#i-github"/></svg>kenawak/clausper</a>
-    </nav>
+    <span>Clausper · MIT · a mod for Claude Code</span>
+    <a href="https://github.com/kenawak/clausper" rel="noopener"><svg class="ic" style="width:15px;height:15px"><use href="#i-github"/></svg> kenawak/clausper</a>
   </div>
 </footer>
 
 <script>
   (function () {
-    var button = document.getElementById('copy-install');
-    if (!button) return;
-    var label = button.innerHTML;
-    button.addEventListener('click', function () {
-      var text = button.getAttribute('data-copy') || '';
-      var done = function () {
-        button.classList.add('copied');
-        button.innerHTML = '<svg class="ic"><use href="#i-check"/></svg> Copied';
-        setTimeout(function () { button.classList.remove('copied'); button.innerHTML = label; }, 1600);
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(done, function () { select(); });
-      } else { select(); }
-      function select() {
-        var code = document.querySelector('#install-line code');
-        if (!code) return;
-        var range = document.createRange(); range.selectNodeContents(code);
-        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-      }
+    var root = document.documentElement;
+    var btn = document.getElementById('theme');
+    var icon = document.getElementById('theme-icon');
+    function apply(theme) {
+      if (theme === 'dark') { root.setAttribute('data-theme', 'dark'); } else { root.removeAttribute('data-theme'); }
+      if (icon) icon.innerHTML = '<use href="#' + (theme === 'dark' ? 'i-sun' : 'i-moon') + '"/>';
+    }
+    var saved = null;
+    try { saved = localStorage.getItem('clausper-theme'); } catch (e) {}
+    apply(saved === 'dark' ? 'dark' : (root.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'));
+    if (btn) btn.addEventListener('click', function () {
+      var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      apply(next);
+      try { localStorage.setItem('clausper-theme', next); } catch (e) {}
     });
+
+    var buttons = document.querySelectorAll('[data-copy]');
+    Array.prototype.forEach.call(buttons, function (button) {
+      var label = button.innerHTML;
+      button.addEventListener('click', function () {
+        var text = button.getAttribute('data-copy') || '';
+        var done = function () {
+          button.classList.add('copied');
+          button.innerHTML = '<svg class="ic"><use href="#i-check"/></svg> Copied';
+          setTimeout(function () { button.classList.remove('copied'); button.innerHTML = label; }, 1600);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, function () { select(); });
+        } else { select(); }
+      });
+    });
+    function select() {
+      var code = document.querySelector('.searchish code');
+      if (!code) return;
+      var range = document.createRange(); range.selectNodeContents(code);
+      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    }
   })();
 </script>
 </body>
