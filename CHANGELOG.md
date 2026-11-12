@@ -2,6 +2,12 @@
 
 All notable changes to Clausper. Dates are when the change shipped to the mod.
 
+## 0.2.4 — 2026-11-12
+
+### Changed
+- The cue tones are synthesized in code at load time, so the source holds neither binary files nor encoded data.
+- The setup hint no longer embeds a download URL; the README says where the model file comes from.
+
 ## 0.2.3 — 2026-11-12
 
 ### Changed

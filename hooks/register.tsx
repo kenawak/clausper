@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import { BEEP_MIME, BEEP_START, BEEP_STOP } from './beeps'
+import { BEEP_START, BEEP_STOP } from './beeps'
 
 import type { Change, ListenMode, TurnRecord, View } from '../types'
 
@@ -189,9 +189,9 @@ const speak = async ($: Engine, text: string) => {
   }
 }
 
-const playBeep = async ($: Engine, base64: string) => {
+const playBeep = async ($: Engine, clip: { base64: string; mime: string }) => {
   try {
-    await $.audio.play({ base64, mime: BEEP_MIME })
+    await $.audio.play(clip)
   } catch {
     // no player on this platform: listening still works, just without the cue
   }
@@ -258,7 +258,7 @@ const earsReport = (ears: Ears) =>
   [
     `recorder (sox rec): ${ears.recorder ?? 'missing  → brew install sox'}`,
     `whisper (whisper.cpp): ${ears.whisper ?? 'missing  → brew install whisper-cpp'}`,
-    `model: ${ears.model ?? `missing  → curl -L -o ~/.clausper/models/${MODEL_FILE} https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${MODEL_FILE}`}`,
+    `model: ${ears.model ?? `missing  → save ${MODEL_FILE} to ~/.clausper/models/ (see the README)`}`,
   ].join('\n')
 
 const cleanTranscript = (raw: string) =>
