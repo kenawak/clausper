@@ -40,16 +40,59 @@ next prompt. Nothing leaves your machine: recording uses `sox`, transcription us
 with a local model.
 
     brew install sox whisper-cpp
-    mkdir -p ~/.clausper/models
-    curl -L -o ~/.clausper/models/ggml-base.en.bin \
-      https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+
+Then download the model file `ggml-base.en.bin` (141 MB) from the whisper.cpp model page,
+https://huggingface.co/ggerganov/whisper.cpp/tree/main, and save it as
+`~/.clausper/models/ggml-base.en.bin`. Nothing is executed from the download: it is a data file
+that whisper.cpp reads. A different model file can be named with `CLAUSPER_WHISPER_MODEL`.
 
 Then `/clausper setup` checks the pieces, `/clausper listen` listens once, and
 `/clausper listen auto` turns on hands-free mode. `/clausper listen fill` puts what you said in
 the prompt box instead of sending it, for when you want to check it first. `/clausper listen off`
 turns it off. Say "cancel" or "nothing" to skip a turn. macOS asks for microphone access the
-first time; allow it for your terminal app. Set `CLAUSPER_WHISPER_MODEL` to use another model
-file.
+first time; allow it for your terminal app.
+
+## What Clausper does on your machine
+
+Clausper is a hooks module. This is everything it runs, reads, sends and submits.
+
+**Hooks.** `turn.complete`: reads the reply you just received and starts the summary and speech.
+`turn.start`: resets the per-turn change list. `tool.call` on Edit, Write, NotebookEdit and Bash:
+after the tool has run, records the file path or command for the pane; it never blocks, rewrites
+or denies a call. `command.run` for `/clausper`. `ui.render` for its own pane and the band above
+the prompt. It never touches permission modes, settings, other plugins or the model's system prompt.
+
+**What it sends, and where.** One model call per long reply, through your own Claude Code session
+to the same Anthropic API your session already uses, carrying the text of that reply and a fixed
+instruction to summarize it (the `haiku` model). Short replies are not sent anywhere. No other
+network calls are made by Clausper itself: no telemetry, no third-party service, and your voice
+recordings never leave the machine.
+
+**Programs it runs, and why.** All are run directly, without a shell, with fixed arguments except
+where noted.
+
+- The macOS speech synthesizer, through Claude Code's own speech call, to speak summaries.
+- `killall say`, when you press stop, to end the current utterance.
+- `say -v ?`, for `/clausper voices`, to list installed voices.
+- `which`, to find the recorder and transcriber on your PATH.
+- `rec` (sox), when listening, to record 16 kHz mono from the default microphone until a pause.
+  The output path is a temporary file under `/tmp`.
+- `whisper-cli` (whisper.cpp), to transcribe that file with the model in `~/.clausper/models`
+  or the file named by `CLAUSPER_WHISPER_MODEL`.
+- `rm -f` on that one temporary file afterwards.
+- `git diff -- <file>` and `git status --porcelain -- <file>`, run in the file's folder, when you
+  press a file in the pane, to show its uncommitted changes.
+- `open <file>`, when you press "open in editor".
+
+**Prompts it submits.** In listen mode, after you speak, Clausper submits the transcribed words as
+your next message, verbatim and unedited, marked as coming from the plugin. In fill mode it only
+places them in the prompt box and you press enter. Saying "cancel", "nothing" or "skip" submits
+nothing.
+
+**What it reads.** The environment variables `HOME` and `CLAUSPER_WHISPER_MODEL`, the reply text,
+the paths and commands of tool calls in your session, and files you choose to open from the pane.
+It reads no credentials, keys or tokens, and stores only its own settings (voice, listen mode) in
+the plugin store Claude Code provides.
 
 ## Commands
 

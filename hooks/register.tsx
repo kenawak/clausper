@@ -1,6 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import { BEEP_MIME, BEEP_START, BEEP_STOP } from './beeps'
+
 import type { Change, ListenMode, TurnRecord, View } from '../types'
 
 const PANE = 'clausper'
@@ -41,13 +43,13 @@ let speakGeneration = 0
 
 // A press or command hook has a budget of its own; speech and listening run
 // far past it, so they are started from a timer and outlive the dispatch.
-const later = ($: EngineInterface, work: () => Promise<unknown>) => {
+const later = ($: Engine, work: () => Promise<unknown>) => {
   $.clock.after(0, () => {
     void work()
   })
 }
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 const SYSTEM = `You are Clausper, a voice companion for a developer using Claude Code in a terminal.
 The developer does not read the long terminal replies; they HEAR your words through text-to-speech.
@@ -138,7 +140,7 @@ const parseSummary = (text: string): Summary | null => {
   }
 }
 
-const summarize = async ($: $, answer: string, plain: string, lead: string): Promise<Summary> => {
+const summarize = async ($: Engine, answer: string, plain: string, lead: string): Promise<Summary> => {
   const reply = await $.model.complete({
     model: 'haiku',
     system: SYSTEM,
@@ -156,13 +158,13 @@ const summarize = async ($: $, answer: string, plain: string, lead: string): Pro
 
 // ---------------------------------------------------------------- speech
 
-const voiceOptions = async ($: $) => {
+const voiceOptions = async ($: Engine) => {
   const voice = await $.store.get('voice')
   return typeof voice === 'string' && voice !== '' ? { voice } : undefined
 }
 
 // Speaks sentence by sentence so the caption follows the voice.
-const speak = async ($: $, text: string) => {
+const speak = async ($: Engine, text: string) => {
   const words = text.trim().slice(0, 4000)
   if (words === '') return
   speakGeneration += 1
@@ -187,7 +189,15 @@ const speak = async ($: $, text: string) => {
   }
 }
 
-const stopSpeaking = async ($: $) => {
+const playBeep = async ($: Engine, base64: string) => {
+  try {
+    await $.audio.play({ base64, mime: BEEP_MIME })
+  } catch {
+    // no player on this platform: listening still works, just without the cue
+  }
+}
+
+const stopSpeaking = async ($: Engine) => {
   speakGeneration += 1
   try {
     await $.process.run(['killall', 'say'], { timeoutMs: 3000 })
@@ -201,7 +211,7 @@ const stopSpeaking = async ($: $) => {
 const spokenFor = (turn: TurnRecord) =>
   [turn.lead, turn.spoken, turn.asks].filter(part => part !== '').join(' ')
 
-const sayLast = async ($: $) => {
+const sayLast = async ($: Engine) => {
   const [last] = await read($, turns)
   if (last === undefined) {
     $.ui.toast('Clausper: nothing to say yet')
@@ -214,26 +224,33 @@ const sayLast = async ($: $) => {
 
 type Ears = { recorder: string | null; whisper: string | null; model: string | null }
 
-const firstPresent = async ($: $, names: string[], dirs: string[]) => {
+const firstPresent = async ($: Engine, names: string[], dirs: string[]) => {
   for (const name of names) {
-    const found = await $.process.run(['which', name], { timeoutMs: 3000 }).catch(() => null)
-    if (found !== null && found.exitCode === 0 && found.stdout.trim() !== '') return found.stdout.trim()
+    try {
+      const found = await $.process.run(['which', name], { timeoutMs: 3000 })
+      if (found.exitCode === 0 && found.stdout.trim() !== '') return found.stdout.trim()
+    } catch {
+      // `which` itself is missing: fall back to the known folders
+    }
     for (const dir of dirs) {
-      if (await $.fs.exists(`${dir}/${name}`)) return `${dir}/${name}`
+      const isThere = await $.fs.exists(`${dir}/${name}`)
+      if (isThere) return `${dir}/${name}`
     }
   }
   return null
 }
 
-const findEars = async ($: $): Promise<Ears> => {
-  const home = (await $.env.get('HOME')) ?? '/tmp'
+const findEars = async ($: Engine): Promise<Ears> => {
+  const homeVar = await $.env.get('HOME')
+  const home = homeVar ?? '/tmp'
   const dirs = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
   const override = await $.env.get('CLAUSPER_WHISPER_MODEL')
   const modelPath = override ?? `${home}/.clausper/models/${MODEL_FILE}`
+  const hasModel = await $.fs.exists(modelPath)
   return {
     recorder: await firstPresent($, ['rec'], dirs),
     whisper: await firstPresent($, ['whisper-cli', 'whisper-cpp', 'main'], dirs.slice(0, 2)),
-    model: (await $.fs.exists(modelPath)) ? modelPath : null,
+    model: hasModel ? modelPath : null,
   }
 }
 
@@ -254,7 +271,7 @@ const cleanTranscript = (raw: string) =>
 const CANCEL = /^(cancel|never ?mind|nothing|no|nope|skip|stop|not now|that's all|thanks?|thank you)[.!]?$/i
 
 // Records until a pause, transcribes, and hands the words to the prompt.
-const listenOnce = async ($: $, options: { ask: boolean }) => {
+const listenOnce = async ($: Engine, options: { ask: boolean }) => {
   if (await read($, isListening)) return
   const ears = await findEars($)
   if (ears.recorder === null || ears.whisper === null || ears.model === null) {
@@ -276,20 +293,29 @@ const listenOnce = async ($: $, options: { ask: boolean }) => {
       await update($, caption, () =>
         attempt === 1 ? 'Listening… speak, then pause. Say "cancel" to skip.' : 'Still listening… go ahead.',
       )
-      void $.audio.play({ asset: 'assets/listen-start.wav' }).catch(() => undefined)
-      const recorded = await $.process
-        .run(
+      await playBeep($, BEEP_START)
+      // sox: record 16 kHz mono from the default microphone until a pause.
+      let recorded = { exitCode: -1, stdout: '', stderr: '' }
+      try {
+        recorded = await $.process.run(
           [ears.recorder, '-q', '-r', '16000', '-c', '1', '-b', '16', wav, ...SILENCE_ARGS, 'trim', '0', String(RECORD_SECONDS)],
           { timeoutMs: (RECORD_SECONDS + 15) * 1000 },
         )
-        .catch((error: unknown) => ({ exitCode: -1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))
-      const size = (await $.fs.exists(wav)) ? (await $.fs.stat(wav)).size : 0
+      } catch (error) {
+        recorded = { exitCode: -1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }
+      }
+      let size = 0
+      const hasWav = await $.fs.exists(wav)
+      if (hasWav) {
+        const stat = await $.fs.stat(wav)
+        size = stat.size
+      }
       seconds = Math.max(0, size - 44) / WAV_BYTES_PER_SECOND
       outcome = `attempt ${attempt}: exit ${recorded.exitCode}, ${seconds.toFixed(1)} s of audio`
       $.ui.log(`clausper: listen ${outcome} ${recorded.stderr.slice(0, 120)}`, { to: 'debug' })
       if (recorded.exitCode === -1) break
     }
-    void $.audio.play({ asset: 'assets/listen-stop.wav' }).catch(() => undefined)
+    await playBeep($, BEEP_STOP)
     if (seconds < MIN_SPEECH_SECONDS) {
       await update($, lastListen, () => `Heard nothing above the noise floor (${outcome})`)
       await speak($, "I didn't hear anything. Try /clausper listen and speak a little louder.")
@@ -331,26 +357,30 @@ const listenOnce = async ($: $, options: { ask: boolean }) => {
     $.ui.status(undefined)
     await update($, caption, () => null)
     await update($, isListening, () => false)
-    void $.process.run(['rm', '-f', wav], { timeoutMs: 3000 }).catch(() => null)
+    try {
+      await $.process.run(['rm', '-f', wav], { timeoutMs: 3000 })
+    } catch {
+      // the temp file is gone already
+    }
   }
 }
 
-const setListenMode = async ($: $, mode: ListenMode) => {
+const setListenMode = async ($: Engine, mode: ListenMode) => {
   await $.store.set('listenMode', mode)
   await update($, listenMode, () => mode)
 }
 
 // ---------------------------------------------------------------- the digest
 
-const patchTurn = ($: $, id: string, patch: Partial<TurnRecord>) =>
+const patchTurn = ($: Engine, id: string, patch: Partial<TurnRecord>) =>
   update($, turns, list => list.map(turn => (turn.id === id ? { ...turn, ...patch } : turn)))
 
-const afterSpeaking = async ($: $) => {
+const afterSpeaking = async ($: Engine) => {
   if ((await read($, listenMode)) === 'off') return
   await listenOnce($, { ask: true })
 }
 
-const digest = async ($: $, id: string, answer: string) => {
+const digest = async ($: Engine, id: string, answer: string) => {
   const started = await $.clock.now()
   const plain = plainText(answer)
   const muted = await read($, isMuted)
@@ -376,7 +406,8 @@ const digest = async ($: $, id: string, answer: string) => {
   await patchTurn($, id, { lead, headline: clip(lead, 60) })
   const leadSpoken = muted ? Promise.resolve() : speak($, lead)
   const summary = await summarize($, answer, plain, lead)
-  const summaryMs = (await $.clock.now()) - started
+  const finished = await $.clock.now()
+  const summaryMs = finished - started
   await patchTurn($, id, { ...summary, summaryMs })
   $.ui.status(undefined)
   $.ui.log(`clausper: summary in ${summaryMs} ms (${summary.status})`, { to: 'debug' })
@@ -387,7 +418,7 @@ const digest = async ($: $, id: string, answer: string) => {
 
 // ---------------------------------------------------------------- change details
 
-const describeChange = async ($: $, change: Change): Promise<{ text: string | null; note: string }> => {
+const describeChange = async ($: Engine, change: Change): Promise<{ text: string | null; note: string }> => {
   if (change.kind === 'ran') {
     return { text: change.command ?? null, note: 'Command this turn ran' }
   }
@@ -623,7 +654,8 @@ export const register: Register = on => {
 
   // ---------------------------------------------------------------- pane
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (e.requestId !== PANE) return next(e)
     const { Box, Text, Button, Code } = $.ui.resolve(e)
     const list = await read($, turns)
     const current = await read($, view)
@@ -637,7 +669,7 @@ export const register: Register = on => {
     const now = await $.clock.now()
     const width = Math.max(20, e.props.bodyColumns)
 
-    const setView = (next: View) => update($, view, () => next)
+    const setView = (target: View) => update($, view, () => target)
     const showList = () => setView({ kind: 'list' })
     const showTurn = (turnId: string) => setView({ kind: 'turn', turnId })
     const showDetail = async (turn: TurnRecord, change: Change) => {

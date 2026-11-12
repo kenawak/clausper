@@ -1,7 +1,8 @@
 {
   "name": "clausper",
   "owner": {
-    "name": "kenawak"
+    "name": "kenawak",
+    "url": "https://github.com/kenawak"
   },
   "plugins": [
     {

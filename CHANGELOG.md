@@ -2,6 +2,13 @@
 
 All notable changes to Clausper. Dates are when the change shipped to the mod.
 
+## 0.2.3 — 2026-11-12
+
+### Changed
+- The two beep sounds are embedded in the source instead of shipped as `.wav` files, so the plugin contains no binary files.
+- Source rewritten to the plugin directory's plain-call rules; no behavior change.
+- README documents every program the mod runs, what it sends and where, and what it submits as prompts.
+
 ## 0.2.2 — 2026-11-12
 
 ### Fixed
