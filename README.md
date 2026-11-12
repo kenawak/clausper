@@ -94,6 +94,8 @@ the paths and commands of tool calls in your session, and files you choose to op
 It reads no credentials, keys or tokens, and stores only its own settings (voice, listen mode) in
 the plugin store Claude Code provides.
 
+Privacy: [PRIVACY.md](PRIVACY.md). Terms: [TERMS.md](TERMS.md).
+
 ## Commands
 
 - `/clausper` opens the pane
