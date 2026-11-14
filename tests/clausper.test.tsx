@@ -191,7 +191,7 @@ test('listening: the wake word decides between sending and filling the prompt', 
   let transcript = ' Add a readme file and commit it.\n'
   on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/ken' : undefined }))
   on('fs.exists', () => ({ value: true }))
-  on('fs.stat', () => ({ value: { kind: 'file', size: 44 + 32000 * 3 } }))
+  on('fs.stat', () => ({ value: { kind: 'file', size: 44 + 32000 * 3, mtimeMs: 0, isLink: false } }))
   on('audio.play', () => ({ value: undefined }))
   on('prompt.submit', (_, e) => {
     submitted.push(e.text)
