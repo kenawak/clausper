@@ -1,5 +1,6 @@
 import type { ModelCompleteResult, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
 const PANE = {
   plugin: 'clausper',
@@ -43,14 +44,14 @@ const LONG_REPLY = [
 const LEAD = 'Done Clausper is built and loaded.'
 
 // Nothing sits beneath the plugin: each hook here stands for the engine.
-const engine = (on: On, spoken: string[], completion: ModelCompleteResult = ANSWERED) => {
+const engine = (on: On, spoken: string[], completion: ModelCompleteResult = ANSWERED, cwd = '/') => {
   const clock = mock.clock(on)
   mock.store(on)
   const calls = { model: 0 }
   on('command.register', () => ({ value: { command: 'clausper' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.panes', () => ({ value: [] }))
-  on('session.cwd', () => ({ value: '/' }))
+  on('session.cwd', () => ({ value: cwd }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
@@ -271,5 +272,90 @@ test('setup reports what listening needs, and listen mode is remembered', async 
   expect(auto.text).toContain('What next?')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /ears auto/ })).toBeDefined()
+  await ui.unmount()
+})
+
+// ---------------------------------------------------------------- the floor
+
+const OK_RUN = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+const SHORT_REPLY = '**Fixed** the `login` bug. Tests pass now.'
+
+const command = ($: Parameters<TestBody>[0], args: string) =>
+  $.command.run({ command: 'clausper', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+
+const FLOOR = '/home/ken/.clausper/floor'
+
+// ~/.clausper/floor as another session left it: held for `busyFor` tries, its owner
+// stamped at `stamp`. Once the plugin holds it, its own stamps replace the owner.
+const floor = (on: On, options: { busyFor: number; stamp: number }) => {
+  const commands: (readonly string[])[] = []
+  let owner = `other-session ${options.stamp}`
+  let busy = options.busyFor
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/ken' : undefined }))
+  on('fs.exists', () => ({ value: true }))
+  on('fs.write', (_, e) => {
+    if (e.path === `${FLOOR}/owner`) owner = e.text
+    return { value: undefined }
+  })
+  on('fs.read', (_, e) => ({ value: e.path === `${FLOOR}/owner` ? owner : '' }))
+  on('process.run', (_, e) => {
+    commands.push(e.argv)
+    if (e.argv[0] === 'mkdir' && e.argv[1] === '-m' && busy > 0) {
+      busy -= 1
+      return { value: { ...OK_RUN, exitCode: 1, stderr: 'mkdir: File exists' } }
+    }
+    return { value: OK_RUN }
+  })
+  return { commands }
+}
+
+test('the floor: a turn that ends while another session speaks waits, then says which project it is', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken, ANSWERED, '/home/ken/dev/weather_app')
+  const f = floor(on, { busyFor: 2, stamp: 9e12 })
+  await $.session.start({ cwd: '/home/ken/dev/weather_app', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'fix it', turnId: 'f1' })
+  await $.turn.complete({ answer: SHORT_REPLY, durationMs: 10, isAborted: false, turnId: 'f1', reason: 'answer' })
+
+  await clock.advance(1)
+  expect(spoken).toEqual([])
+  await clock.advance(250)
+  expect(spoken).toEqual([])
+  await clock.advance(250)
+  expect(spoken).toEqual(['In weather app.', 'Fixed the login bug.', 'Tests pass now.'])
+  // Released afterwards, and only because the owner stamp is this session's own.
+  expect(f.commands).toContainEqual(['rm', '-rf', FLOOR])
+})
+
+test('the floor: a floor left by a crashed session is moved aside and taken', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  const f = floor(on, { busyFor: 1, stamp: 0 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(20000)
+  await $.turn.start({ text: 'fix it', turnId: 'f2' })
+  await $.turn.complete({ answer: SHORT_REPLY, durationMs: 10, isAborted: false, turnId: 'f2', reason: 'answer' })
+  await clock.advance(1)
+
+  expect(spoken).toEqual(['Fixed the login bug.', 'Tests pass now.'])
+  const moved = f.commands.find(argv => argv[0] === 'mv')
+  expect(moved?.[1]).toBe(FLOOR)
+  expect(moved?.[2]?.startsWith(`${FLOOR}.stale-`)).toBe(true)
+})
+
+test('the floor: stop while waiting gives up the turn, and the summary still reaches the pane', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  floor(on, { busyFor: 1000, stamp: 9e12 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'build it', turnId: 'f3' })
+  await $.turn.complete({ answer: LONG_REPLY, durationMs: 10, isAborted: false, turnId: 'f3', reason: 'answer' })
+  await clock.advance(1)
+
+  await command($, 'stop')
+  await clock.advance(1000)
+  expect(spoken).toEqual([])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Button', text: /Added the Clausper pane/ })).toBeDefined()
   await ui.unmount()
 })

@@ -164,6 +164,169 @@ const summarize = async ($: Engine, answer: string, plain: string, lead: string)
   return parseSummary(reply.text) ?? fallbackSummary(plain, lead)
 }
 
+// ---------------------------------------------------------------- the floor
+
+// Every Claude Code session runs its own Clausper. The floor makes them take
+// turns: one session at a time speaks, and listens in listen mode, so two turns
+// that end together are heard one after the other instead of over each other,
+// and one spoken answer is never recorded by two sessions.
+//
+// The floor is a folder, ~/.clausper/floor: mkdir is atomic, so exactly one
+// session creates it. The holder rewrites floor/owner every few seconds; a floor
+// whose owner has been quiet longer than FLOOR_STALE_MS (a session that crashed
+// or was killed) is moved aside and taken.
+const FLOOR_POLL_MS = 250
+const FLOOR_BEAT_MS = 2000
+const FLOOR_STALE_MS = 10000
+// Past this, a session stops waiting and speaks anyway.
+const FLOOR_MAX_WAIT_MS = 180000
+
+// This session's name on the floor.
+const floorToken = crypto.randomUUID()
+// How deep this session's hold goes: a digest holds the floor, and its speak and
+// listen calls inside run on that hold.
+let floorDepth = 0
+// Bumped by stop: a session waiting for the floor gives up that turn.
+let floorWait = 0
+// The floor folder while this session holds it, so a session that ends mid-turn hands it on.
+let heldFloor = ''
+
+// free: taken at once; waited: taken after another session's turn; skipped: stop
+// was pressed while waiting; open: no floor to take (no home folder, no mkdir, or
+// waited too long), so the session speaks without one.
+type FloorTurn = 'free' | 'waited' | 'skipped' | 'open' | 'held'
+
+const stampFloor = async ($: Engine, dir: string) => {
+  try {
+    await $.fs.write(`${dir}/owner`, `${floorToken} ${await $.clock.now()}`)
+  } catch {
+    // the next beat writes it again; until then the folder's own time stands in
+  }
+}
+
+// When the holder last showed it was alive, in epoch milliseconds; null once the floor is gone.
+const floorBeat = async ($: Engine, dir: string): Promise<number | null> => {
+  try {
+    const owner = await $.fs.read(`${dir}/owner`)
+    const stamp = Number(String(owner).trim().split(' ')[1])
+    if (Number.isFinite(stamp)) return stamp
+  } catch {
+    // no owner file yet: the holder is between mkdir and its first stamp
+  }
+  try {
+    const stat = await $.fs.stat(dir)
+    return stat.mtimeMs
+  } catch {
+    return null
+  }
+}
+
+const takeFloor = async ($: Engine): Promise<{ turn: FloorTurn; dir: string }> => {
+  const home = await $.env.get('HOME')
+  if (home === undefined || !home.startsWith('/')) return { turn: 'open', dir: '' }
+  const dir = `${home}/.clausper/floor`
+  await $.process.run(['mkdir', '-p', `${home}/.clausper`], { timeoutMs: 5000 })
+  const generation = floorWait
+  const started = await $.clock.now()
+  let hasWaited = false
+  let misses = 0
+  try {
+    for (;;) {
+      const made = await $.process.run(['mkdir', '-m', '700', dir], { timeoutMs: 5000 })
+      if (made.exitCode === 0) {
+        await stampFloor($, dir)
+        return { turn: hasWaited ? 'waited' : 'free', dir }
+      }
+      const beat = await floorBeat($, dir)
+      const now = await $.clock.now()
+      if (beat === null) {
+        // Released between our mkdir and our look: try again. A folder that cannot
+        // be made at all (permissions, a full disk) means there is no floor to take.
+        const isThere = await $.fs.exists(dir)
+        misses += 1
+        if (!isThere && misses > 3) return { turn: 'open', dir: '' }
+        if (!isThere) continue
+      } else if (now - beat > FLOOR_STALE_MS) {
+        // Its holder is gone: move the floor aside (one session wins the rename) and try again.
+        const aside = `${dir}.stale-${crypto.randomUUID()}`
+        const moved = await $.process.run(['mv', dir, aside], { timeoutMs: 5000 })
+        if (moved.exitCode === 0) await $.process.run(['rm', '-rf', aside], { timeoutMs: 5000 })
+        continue
+      }
+      if (floorWait !== generation) return { turn: 'skipped', dir: '' }
+      if (now - started > FLOOR_MAX_WAIT_MS) return { turn: 'open', dir: '' }
+      if (!hasWaited) {
+        hasWaited = true
+        $.ui.status('Clausper: another session is speaking; waiting for its turn…')
+      }
+      await $.clock.sleep(FLOOR_POLL_MS)
+    }
+  } finally {
+    if (hasWaited) $.ui.status(undefined)
+  }
+}
+
+const releaseFloor = async ($: Engine, dir: string) => {
+  try {
+    const owner = await $.fs.read(`${dir}/owner`)
+    // Only our own: after a long sleep another session may have taken it over.
+    if (String(owner).startsWith(`${floorToken} `)) await $.process.run(['rm', '-rf', dir], { timeoutMs: 5000 })
+  } catch {
+    // no owner file: leave it; it goes stale and the next session takes it
+  }
+}
+
+// Runs `work` while this session holds the floor, waiting for it first if another
+// session has it. Skipped (resolves undefined) when stop is pressed while waiting.
+// Without a floor to take, `work` runs anyway: speech never depends on the floor.
+const holdFloor = async <T,>($: Engine, work: (turn: FloorTurn) => Promise<T>): Promise<T | undefined> => {
+  if (floorDepth > 0) {
+    floorDepth += 1
+    try {
+      return await work('held')
+    } finally {
+      floorDepth = Math.max(0, floorDepth - 1)
+    }
+  }
+  let taken: { turn: FloorTurn; dir: string } = { turn: 'open', dir: '' }
+  try {
+    taken = await takeFloor($)
+  } catch (error) {
+    $.ui.log(`clausper: no floor (${error instanceof Error ? error.message : String(error)}); speaking anyway`, { to: 'debug' })
+  }
+  if (taken.turn === 'skipped') return undefined
+  const { dir } = taken
+  floorDepth = 1
+  heldFloor = dir
+  let isHeld = dir !== ''
+  let timer: { cancel: () => void } | null = null
+  const beat = () => {
+    if (!isHeld) return
+    void stampFloor($, dir)
+    timer = $.clock.after(FLOOR_BEAT_MS, beat)
+  }
+  if (isHeld) timer = $.clock.after(FLOOR_BEAT_MS, beat)
+  try {
+    return await work(taken.turn)
+  } finally {
+    floorDepth = 0
+    heldFloor = ''
+    isHeld = false
+    timer?.cancel()
+    if (dir !== '') await releaseFloor($, dir)
+  }
+}
+
+// The session's folder name, said before its summary when another session spoke first.
+const projectName = async ($: Engine) => {
+  try {
+    const name = baseName(await $.session.cwd())
+    return name === '/' ? '' : name.replace(/[-_.]+/g, ' ').trim()
+  } catch {
+    return ''
+  }
+}
+
 // ---------------------------------------------------------------- speech
 
 const voiceOptions = async ($: Engine) => {
@@ -171,8 +334,13 @@ const voiceOptions = async ($: Engine) => {
   return typeof voice === 'string' && voice !== '' ? { voice } : undefined
 }
 
-// Speaks sentence by sentence so the caption follows the voice.
+// Speaks on this session's turn of the floor (see holdFloor).
 const speak = async ($: Engine, text: string) => {
+  await holdFloor($, () => speakNow($, text))
+}
+
+// Speaks sentence by sentence so the caption follows the voice.
+const speakNow = async ($: Engine, text: string) => {
   const words = text.trim().slice(0, 4000)
   if (words === '') return
   speakGeneration += 1
@@ -213,6 +381,7 @@ const sayUnlessMuted = async ($: Engine, text: string) => {
 
 const stopSpeaking = async ($: Engine) => {
   speakGeneration += 1
+  floorWait += 1
   try {
     const user = await $.env.get('USER')
     await $.process.run(user ? ['killall', '-u', user, 'say'] : ['killall', 'say'], { timeoutMs: 3000 })
@@ -297,8 +466,13 @@ const MIN_AUTO_SEND_SECONDS = 1.0
 // After this many voice-submitted turns in a row with no typed prompt, fall back to the prompt box.
 const MAX_VOICE_TURNS = 3
 
-// Records until a pause, transcribes, and hands the words to the prompt.
+// Listens on this session's turn of the floor, so two sessions never record the same words.
 const listenOnce = async ($: Engine, options: { ask: boolean }) => {
+  await holdFloor($, () => listenNow($, options))
+}
+
+// Records until a pause, transcribes, and hands the words to the prompt.
+const listenNow = async ($: Engine, options: { ask: boolean }) => {
   if (await read($, isListening)) return
   const ears = await findEars($)
   if (ears.recorder === null || ears.whisper === null || ears.model === null) {
@@ -447,6 +621,19 @@ const digestInner = async ($: Engine, id: string, answer: string) => {
   const started = await $.clock.now()
   const plain = plainText(answer)
   const muted = await read($, isMuted)
+  const listens = (await read($, listenMode)) !== 'off'
+
+  // The turn's voice, lead to listen, is one turn on the floor: another session's
+  // summary never lands between this one's lead and its rest. A session that had
+  // to wait says whose summary follows.
+  const voiced = async (work: () => Promise<void>) => {
+    if (muted && !listens) return work()
+    await holdFloor($, async turn => {
+      const name = turn === 'waited' && !muted ? await projectName($) : ''
+      if (name !== '') await speak($, `In ${name}.`)
+      await work()
+    })
+  }
 
   // Short reply: say it as it is, right away.
   if (plain.length <= SHORT_REPLY_CHARS) {
@@ -459,25 +646,35 @@ const digestInner = async ($: Engine, id: string, answer: string) => {
       summaryMs: 0,
     })
     $.ui.status(undefined)
-    if (!muted) await speak($, plain)
-    await afterSpeaking($)
+    await voiced(async () => {
+      if (!muted) await speak($, plain)
+      await afterSpeaking($)
+    })
     return
   }
 
-  // Long reply: speak the opening sentence now while Haiku writes the rest.
+  // Long reply: speak the opening sentence now while Haiku writes the rest. The
+  // summary is written even while this session waits for its turn on the floor.
   const lead = clip(leadOf(plain), 220)
   await patchTurn($, id, { lead, headline: clip(lead, 60) })
-  const leadSpoken = muted ? Promise.resolve() : speak($, lead)
   const offline = await read($, isPrivate)
-  const summary = offline ? fallbackSummary(plain, lead) : await summarize($, answer, plain, lead)
-  const finished = await $.clock.now()
-  const summaryMs = finished - started
-  await patchTurn($, id, { ...summary, summaryMs })
-  $.ui.status(undefined)
-  $.ui.log(`clausper: summary in ${summaryMs} ms (${summary.status})`, { to: 'debug' })
-  await leadSpoken
-  if (!muted) await speak($, [summary.spoken, summary.asks].filter(part => part !== '').join(' '))
-  await afterSpeaking($)
+  const summarized = (async () => {
+    const summary = offline ? fallbackSummary(plain, lead) : await summarize($, answer, plain, lead)
+    const finished = await $.clock.now()
+    const summaryMs = finished - started
+    await patchTurn($, id, { ...summary, summaryMs })
+    $.ui.status(undefined)
+    $.ui.log(`clausper: summary in ${summaryMs} ms (${summary.status})`, { to: 'debug' })
+    return summary
+  })()
+  await voiced(async () => {
+    const leadSpoken = muted ? Promise.resolve() : speak($, lead)
+    const summary = await summarized
+    await leadSpoken
+    if (!muted) await speak($, [summary.spoken, summary.asks].filter(part => part !== '').join(' '))
+    await afterSpeaking($)
+  })
+  await summarized
 }
 
 // ---------------------------------------------------------------- change details
@@ -694,6 +891,13 @@ export const register: Register = on => {
         return { text: USAGE }
     }
   })
+
+  // A session that ends while it holds the floor hands it on at once, instead of
+  // leaving the others to wait for it to go stale. A /clear keeps the process and its turn.
+  on('session.end', async ($, e, next) => {
+    if (e.reason !== 'clear' && heldFloor !== '') await releaseFloor($, heldFloor)
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   on('prompt.submit', ($, e, next) => {
     if (e.origin.kind === 'composer') voiceTurns = 0
