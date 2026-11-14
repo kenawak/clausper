@@ -132,7 +132,7 @@ test('muting keeps the summary but silences speech', async ($, on) => {
     command: 'clausper',
     args: 'mute',
     origin: { kind: 'composer' },
-    presentation: { isFullscreen: false },
+    presentation: { isFullscreen: false, columns: 80 },
   })
   expect(muted.text).toContain('muted')
 
@@ -191,7 +191,7 @@ test('listening: the wake word decides between sending and filling the prompt', 
   let transcript = ' Add a readme file and commit it.\n'
   on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/ken' : undefined }))
   on('fs.exists', () => ({ value: true }))
-  on('fs.stat', () => ({ value: { size: 44 + 32000 * 3, isFile: true, isDirectory: false, mtimeMs: 0 } }))
+  on('fs.stat', () => ({ value: { kind: 'file', size: 44 + 32000 * 3 } }))
   on('audio.play', () => ({ value: undefined }))
   on('prompt.submit', (_, e) => {
     submitted.push(e.text)
@@ -203,12 +203,12 @@ test('listening: the wake word decides between sending and filling the prompt', 
   })
   on('process.run', (_, e) => {
     const [cmd = ''] = e.argv
-    if (cmd === 'mktemp') return { value: { exitCode: 0, stdout: '/tmp/clausper.abc\n', stderr: '' } }
-    if (cmd.endsWith('whisper-cli')) return { value: { exitCode: 0, stdout: transcript, stderr: '' } }
-    return { value: { exitCode: 0, stdout: '', stderr: '' } }
+    if (cmd === 'mktemp') return { value: { exitCode: 0, stdout: '/tmp/clausper.abc\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (cmd.endsWith('whisper-cli')) return { value: { exitCode: 0, stdout: transcript, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   const run = (args: string) =>
-    $.command.run({ command: 'clausper', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false } })
+    $.command.run({ command: 'clausper', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await run('listen auto')
@@ -241,7 +241,7 @@ test('private mode makes no model call and speaks the reply itself', async ($, o
   const spoken: string[] = []
   const { clock, calls } = engine(on, spoken)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await $.command.run({ command: 'clausper', args: 'private on', origin: { kind: 'composer' }, presentation: { isFullscreen: false } })
+  await $.command.run({ command: 'clausper', args: 'private on', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
   await $.turn.start({ text: 'build', turnId: 'p1' })
   await $.turn.complete({ answer: LONG_REPLY, durationMs: 10, isAborted: false, turnId: 'p1', reason: 'answer' })
   await clock.advance(1)
@@ -255,11 +255,11 @@ test('setup reports what listening needs, and listen mode is remembered', async 
   engine(on, spoken)
   on('env.get', () => ({ value: '/home/ken' }))
   on('fs.exists', () => ({ value: false }))
-  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: 'not found' } }))
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: 'not found', isStdoutTruncated: false, isStderrTruncated: false } }))
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const run = (args: string) =>
-    $.command.run({ command: 'clausper', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false } })
+    $.command.run({ command: 'clausper', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
 
   const setup = await run('setup')
   expect(setup.text).toContain('brew install sox')
