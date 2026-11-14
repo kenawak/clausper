@@ -1,5 +1,6 @@
 import type { ModelCompleteResult, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
 const PANE = {
   plugin: 'clausper',
@@ -51,7 +52,11 @@ const engine = (on: On, spoken: string[], completion: ModelCompleteResult = ANSW
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.panes', () => ({ value: [] }))
   on('session.cwd', () => ({ value: '/' }))
-  on('ui.toast', () => ({ value: undefined }))
+  const toasts: string[] = []
+  on('ui.toast', (_, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
   on('ui.status', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -66,7 +71,7 @@ const engine = (on: On, spoken: string[], completion: ModelCompleteResult = ANSW
     spoken.push(e.text)
     return { value: { via: 'system' } }
   })
-  return { clock, calls }
+  return { clock, calls, toasts }
 }
 
 test('a long reply: the opening sentence is spoken at once, then the summary', async ($, on) => {
@@ -273,3 +278,155 @@ test('setup reports what listening needs, and listen mode is remembered', async 
   expect(await ui.find({ type: 'Text', text: /ears auto/ })).toBeDefined()
   await ui.unmount()
 })
+
+// ---------------------------------------------------------------- kokoro voice
+
+const OK_RUN = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+const CLIPS = '/tmp/clausper.k1'
+
+// A Mac with uv and the Kokoro model files: the runner writes one clip per input
+// line and prints its path, or fails after `failAfter` clips.
+const kokoro = (on: On, options: { isInstalled?: boolean; failAfter?: number } = {}) => {
+  const runs: { argv: readonly string[]; input: string }[] = []
+  const commands: (readonly string[])[] = []
+  const played: string[] = []
+  const isInstalled = options.isInstalled ?? true
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/ken' : e.name === 'USER' ? 'ken' : undefined }))
+  on('fs.exists', () => ({ value: isInstalled }))
+  on('process.run', (_, e) => {
+    commands.push(e.argv)
+    const [cmd = ''] = e.argv
+    if (cmd === 'mktemp') return { value: { ...OK_RUN, stdout: `${CLIPS}\n` } }
+    if (e.argv.includes('--list')) return { value: { ...OK_RUN, stdout: 'af_heart\naf_bella\n' } }
+    return { value: OK_RUN }
+  })
+  on('process.spawn', async function* (_, e) {
+    runs.push({ argv: e.argv, input: e.input ?? '' })
+    const lines = (e.input ?? '').split('\n').filter(line => line !== '')
+    for (const [index] of lines.entries()) {
+      if (options.failAfter !== undefined && index >= options.failAfter) {
+        yield { stream: 'stderr' as const, text: 'RuntimeError: onnxruntime ran out of memory\n' }
+        return { value: { code: 1, signal: null } }
+      }
+      yield { stream: 'stdout' as const, text: `${CLIPS}/${String(index + 1).padStart(3, '0')}.wav\n` }
+    }
+    return { value: { code: 0, signal: null } }
+  })
+  on('fs.read', (_, e) => ({ value: { base64: btoa(e.path) } }))
+  on('audio.play', (_, e) => {
+    if (e.clip.base64 !== undefined) played.push(atob(e.clip.base64))
+    return { value: undefined }
+  })
+  return { runs, commands, played }
+}
+
+const command = ($: Parameters<TestBody>[0], args: string) =>
+  $.command.run({ command: 'clausper', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+
+const SHORT_REPLY = '**Fixed** the `login` bug. Tests pass now.'
+
+test('kokoro: a chosen Kokoro voice speaks through the local runner, one clip per sentence', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  const k = kokoro(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const set = await command($, 'voice af_bella')
+  expect(set.text).toBe('Clausper voice set to Kokoro af_bella.')
+  await clock.advance(1)
+  expect(k.runs[0]?.input).toBe('Hi, this is Bella.\nI am Clausper.\n')
+  k.played.length = 0
+
+  await $.turn.start({ text: 'fix it', turnId: 'k1' })
+  await $.turn.complete({ answer: SHORT_REPLY, durationMs: 10, isAborted: false, turnId: 'k1', reason: 'answer' })
+  await clock.advance(1)
+
+  expect(spoken).toEqual([])
+  expect(k.played).toEqual([`${CLIPS}/001.wav`, `${CLIPS}/002.wav`])
+  const run = k.runs.at(-1)
+  expect(run?.input).toBe('Fixed the login bug.\nTests pass now.\n')
+  // Offline, hash-locked, no project config, uv from Homebrew's folder, the model from ~/.clausper.
+  expect(run?.argv.slice(0, 7)).toEqual(['/opt/homebrew/bin/uv', 'run', '--offline', '--locked', '--no-config', '--quiet', '--script'])
+  expect(run?.argv.join(' ')).toContain('--model /home/ken/.clausper/models/kokoro-v1.0.onnx --voices /home/ken/.clausper/models/voices-v1.0.bin --voice af_bella')
+  // Each utterance's private folder is removed afterwards.
+  expect(k.commands.filter(argv => argv[0] === 'rm')).toContainEqual(['rm', '-rf', CLIPS])
+})
+
+test('kokoro: when the runner fails, the system voice says the rest and a toast says why', async ($, on) => {
+  const spoken: string[] = []
+  const { clock, toasts } = engine(on, spoken)
+  const k = kokoro(on, { failAfter: 1 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await command($, 'voice kokoro')
+
+  await $.turn.start({ text: 'fix it', turnId: 'k2' })
+  await $.turn.complete({ answer: SHORT_REPLY, durationMs: 10, isAborted: false, turnId: 'k2', reason: 'answer' })
+  await clock.advance(1)
+
+  expect(k.played.at(-1)).toBe(`${CLIPS}/001.wav`)
+  expect(spoken.at(-1)).toBe('Tests pass now.')
+  expect(toasts.join('\n')).toContain('the Kokoro voice failed (RuntimeError: onnxruntime ran out of memory)')
+})
+
+test('kokoro: not set up, the system voice speaks and setup says what is missing', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  const k = kokoro(on, { isInstalled: false })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const set = await command($, 'voice kokoro bm_george')
+  expect(set.text).toContain('Kokoro is not set up yet')
+  await clock.advance(1)
+  expect(spoken).toEqual(['Hi, this is George.', 'I am Clausper.'])
+  expect(k.runs).toEqual([])
+
+  const setup = await command($, 'setup')
+  expect(setup.text).toContain('voice: Kokoro bm_george')
+  expect(setup.text).toContain('brew install uv')
+  expect(setup.text).toContain('save kokoro-v1.0.onnx to ~/.clausper/models/')
+
+  const unknown = await command($, 'voice kokoro zz_nobody')
+  expect(unknown.text).toContain('No Kokoro voice zz_nobody')
+  const back = await command($, 'voice default')
+  expect(back.text).toContain('system default voice')
+})
+
+test('kokoro: install fetches only the hash-locked packages, and setup then reports ready', async ($, on) => {
+  const spoken: string[] = []
+  const { clock, toasts } = engine(on, spoken)
+  const k = kokoro(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await command($, 'voice install')
+  await clock.advance(1)
+  const sync = k.commands.find(argv => argv[1] === 'sync')
+  expect(sync?.[0]).toBe('/opt/homebrew/bin/uv')
+  expect(sync).toContain('--locked')
+  expect(sync).toContain('--no-config')
+  expect(sync?.[3]?.endsWith('/tts/kokoro.py')).toBe(true)
+  expect(toasts).toContain('Clausper: the Kokoro voice is installed.')
+
+  const setup = await command($, 'setup')
+  expect(setup.text).toContain('Kokoro packages: installed')
+  expect(setup.text).toContain('Turn it on with /clausper voice kokoro')
+})
+
+test('kokoro: a long reply speaks the lead, then the summary prepared while the lead played', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  const k = kokoro(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await command($, 'voice am_michael')
+  await clock.advance(1)
+  k.runs.length = 0
+  k.played.length = 0
+
+  await $.turn.start({ text: 'build it', turnId: 'k3' })
+  await $.turn.complete({ answer: LONG_REPLY, durationMs: 10, isAborted: false, turnId: 'k3', reason: 'answer' })
+  await clock.advance(1)
+
+  expect(spoken).toEqual([])
+  expect(k.runs.map(run => run.input)).toEqual([`${LEAD}\n`, `${SUMMARY.spoken}\n${SUMMARY.asks}\n`])
+  expect(k.played).toEqual([`${CLIPS}/001.wav`, `${CLIPS}/001.wav`, `${CLIPS}/002.wav`])
+})
+

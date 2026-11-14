@@ -8,22 +8,35 @@ and how to report a problem.
 
 The whole mod is one readable TypeScript file, `hooks/register.tsx`, plus `hooks/beeps.ts`
 (two generated tones) and `types/index.d.ts`. There is no build step, no bundling, no
-dependencies and no minified code: what is in the repository is what runs.
+dependencies and no minified code: what is in the repository is what runs. The optional Kokoro
+voice adds `tts/kokoro.py`, a short Python runner, and `tts/kokoro.py.lock`, the PyPI packages it
+uses, each pinned by version and hash.
 
 - **Network.** Search the source for `http`, `fetch`, `url` and `socket`. The only network
   activity is one `$.model.complete` call per long reply, which goes through your own Claude
   Code session to the Anthropic API it already uses. `/clausper private on` turns even that
-  off. There is no telemetry and no other endpoint.
+  off. The one exception is `/clausper voice install`, which you run once to fetch Kokoro's
+  pinned packages from PyPI with uv. Speaking runs uv with `--offline`. There is no telemetry
+  and no other endpoint.
 - **Programs.** Search for `process.run`. Every command is listed in the README under
   "What Clausper does on your machine": the speech synthesizer, `killall -u <you> say`,
   `say -v ?`, `mktemp`, `rec`, `whisper-cli`, `rm -rf` on the one private recording folder,
-  `git diff`, `git status`, and `open` on a file you pressed. All run directly, without a shell.
+  `uv` for the optional Kokoro voice, `git diff`, `git status`, and `open` on a file you pressed.
+  All run directly, without a shell.
 - **Where programs come from.** The recorder and transcriber are looked up in the package
   managers' own folders (`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`). PATH is never
   searched. The overrides `CLAUSPER_RECORDER`, `CLAUSPER_WHISPER` and `CLAUSPER_WHISPER_MODEL`
   are honored only when they are absolute paths outside the temporary folder and outside the
   session's project folder, so a repository cannot point them at a file it ships. Without a
-  `HOME`, Clausper does not listen at all.
+  `HOME`, Clausper does not listen at all. `uv` is looked up the same way, in
+  `/opt/homebrew/bin`, `/usr/local/bin` or `~/.local/bin`, or at `CLAUSPER_UV` under the same
+  rules, and Kokoro's model files only in `~/.clausper/models`.
+- **The Kokoro runner.** uv runs `tts/kokoro.py` with `--offline` (no network while speaking),
+  `--locked` (only the hash-pinned packages in `tts/kokoro.py.lock`) and `--no-config` (a
+  `uv.toml` or `pyproject.toml` in your project cannot redirect where packages come from), from
+  a private `mktemp -d` folder that is deleted afterwards. The runner reads sentences on standard
+  input and the two model files, writes WAV files into that folder, and prints their paths;
+  Clausper uses only the count of those lines and plays files at paths it built itself.
 - **Recordings.** Each listen creates a private folder with `mktemp -d` (mode 0700), records one
   file into it, transcribes it locally, and deletes the folder, success or failure.
 - **Prompts.** Search for `prompt.submit` and `prompt.fill`. The only text ever submitted is

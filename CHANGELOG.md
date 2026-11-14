@@ -2,6 +2,16 @@
 
 All notable changes to Clausper. Dates are when the change shipped to the mod.
 
+## Unreleased
+
+### Added
+- A natural voice, optional: Kokoro, an open-weight neural text-to-speech model that runs on the Mac, chosen with `/clausper voice kokoro` or a voice name such as `/clausper voice af_heart`. `/clausper voice install` fetches its packages once; `/clausper setup` checks uv, the model files and the packages; `/clausper voices` lists the Kokoro voices beside the system ones.
+- The Kokoro audio streams: the first sentence plays while the next is being made, and a long reply's summary is made while its opening sentence plays.
+- If Kokoro cannot speak, the system voice says the rest of the utterance and a toast says why.
+
+### Security
+- The runner is `tts/kokoro.py`, run by uv with `--offline`, `--locked` (packages pinned by hash in `tts/kokoro.py.lock`) and `--no-config`, from a private `mktemp -d` folder that is deleted afterwards. uv is looked up only in known folders or at `CLAUSPER_UV` under the same rules as the other overrides.
+
 ## 0.3.1 — 2026-11-14
 
 Fixes from an independent adversarial review of the whole source.
