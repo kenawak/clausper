@@ -2,6 +2,12 @@
 
 All notable changes to Clausper. Dates are when the change shipped to the mod.
 
+## Unreleased
+
+### Added
+- Sessions take turns: when several Claude Code sessions finish together, one speaks (and, in listen mode, listens) while the others wait, so summaries no longer play over each other and one spoken answer is never sent to two sessions. A session that waited names its project first.
+- The turn is a folder, `~/.clausper/floor`, created with `mkdir`, which only one session can win. A session killed while holding it is taken over after ten seconds; one that exits hands it on at once. Stop in a waiting session gives up its turn.
+
 ## 0.3.1 — 2026-11-14
 
 Fixes from an independent adversarial review of the whole source.
