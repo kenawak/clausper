@@ -52,6 +52,10 @@ declare module 'claude-code' {
       heard: string | null
       /** What the last listen did, in one line: for the pane and for debugging. */
       lastListen: string | null
+      /** Only a sentence starting with the wake word is auto-sent. */
+      wake: boolean
+      /** No model call: summaries come from the reply's own sentences. */
+      isPrivate: boolean
     }
   }
 }

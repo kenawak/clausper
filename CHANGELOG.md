@@ -2,6 +2,18 @@
 
 All notable changes to Clausper. Dates are when the change shipped to the mod.
 
+## 0.3.0 — 2026-11-14
+
+### Security
+- Wake word, on by default: in auto listen mode only a sentence that starts with "Clausper" or "Claude" is sent; anything else goes to the prompt box for you to confirm. `/clausper wake off` disables it.
+- The recorder and transcriber are looked up only in the package managers' folders or at `CLAUSPER_RECORDER` / `CLAUSPER_WHISPER`; PATH is never searched.
+- Each recording lives in a private `mktemp -d` folder (mode 0700) that is deleted afterwards, instead of a predictable file in `/tmp`.
+- Stop ends only your own user's speech processes.
+
+### Added
+- `/clausper private on|off`: no model call at all; summaries are the reply's own opening sentences.
+- SECURITY.md: what the mod does, how to verify it, and how to report.
+
 ## 0.2.4 — 2026-11-12
 
 ### Changed

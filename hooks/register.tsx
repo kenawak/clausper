@@ -37,6 +37,10 @@ const listenMode = atom({ plugin: 'clausper', key: 'listenMode' } as const, 'off
 const isListening = atom({ plugin: 'clausper', key: 'isListening' } as const, false)
 const heard = atom({ plugin: 'clausper', key: 'heard' } as const, null)
 const lastListen = atom({ plugin: 'clausper', key: 'lastListen' } as const, null)
+// Wake word: in auto mode only a sentence that starts with "Clausper" (or "Claude") is sent.
+const wake = atom({ plugin: 'clausper', key: 'wake' } as const, true)
+// Private mode: no model call at all; the spoken summary is the reply's own opening sentences.
+const isPrivate = atom({ plugin: 'clausper', key: 'isPrivate' } as const, false)
 
 // Bumped by stop: a sentence loop that sees another generation ends.
 let speakGeneration = 0
@@ -200,7 +204,8 @@ const playBeep = async ($: Engine, clip: { base64: string; mime: string }) => {
 const stopSpeaking = async ($: Engine) => {
   speakGeneration += 1
   try {
-    await $.process.run(['killall', 'say'], { timeoutMs: 3000 })
+    const user = await $.env.get('USER')
+    await $.process.run(user ? ['killall', '-u', user, 'say'] : ['killall', 'say'], { timeoutMs: 3000 })
   } catch {
     // nothing was speaking
   }
@@ -224,14 +229,15 @@ const sayLast = async ($: Engine) => {
 
 type Ears = { recorder: string | null; whisper: string | null; model: string | null }
 
-const firstPresent = async ($: Engine, names: string[], dirs: string[]) => {
+// Looks only in the package managers' own folders, never on PATH, so a program
+// planted earlier on PATH cannot receive the microphone audio. An explicit
+// override (CLAUSPER_RECORDER, CLAUSPER_WHISPER) is honored when the file exists.
+const firstPresent = async ($: Engine, names: string[], dirs: string[], override: string | undefined) => {
+  if (override !== undefined && override !== '') {
+    const isThere = await $.fs.exists(override)
+    if (isThere) return override
+  }
   for (const name of names) {
-    try {
-      const found = await $.process.run(['which', name], { timeoutMs: 3000 })
-      if (found.exitCode === 0 && found.stdout.trim() !== '') return found.stdout.trim()
-    } catch {
-      // `which` itself is missing: fall back to the known folders
-    }
     for (const dir of dirs) {
       const isThere = await $.fs.exists(`${dir}/${name}`)
       if (isThere) return `${dir}/${name}`
@@ -247,16 +253,18 @@ const findEars = async ($: Engine): Promise<Ears> => {
   const override = await $.env.get('CLAUSPER_WHISPER_MODEL')
   const modelPath = override ?? `${home}/.clausper/models/${MODEL_FILE}`
   const hasModel = await $.fs.exists(modelPath)
+  const recorderOverride = await $.env.get('CLAUSPER_RECORDER')
+  const whisperOverride = await $.env.get('CLAUSPER_WHISPER')
   return {
-    recorder: await firstPresent($, ['rec'], dirs),
-    whisper: await firstPresent($, ['whisper-cli', 'whisper-cpp', 'main'], dirs.slice(0, 2)),
+    recorder: await firstPresent($, ['rec'], dirs, recorderOverride),
+    whisper: await firstPresent($, ['whisper-cli', 'whisper-cpp'], dirs.slice(0, 2), whisperOverride),
     model: hasModel ? modelPath : null,
   }
 }
 
 const earsReport = (ears: Ears) =>
   [
-    `recorder (sox rec): ${ears.recorder ?? 'missing  → brew install sox'}`,
+    `recorder (sox rec): ${ears.recorder ?? 'missing  → brew install sox (or set CLAUSPER_RECORDER)'}`,
     `whisper (whisper.cpp): ${ears.whisper ?? 'missing  → brew install whisper-cpp'}`,
     `model: ${ears.model ?? `missing  → save ${MODEL_FILE} to ~/.clausper/models/ (see the README)`}`,
   ].join('\n')
@@ -269,6 +277,8 @@ const cleanTranscript = (raw: string) =>
     .trim()
 
 const CANCEL = /^(cancel|never ?mind|nothing|no|nope|skip|stop|not now|that's all|thanks?|thank you)[.!]?$/i
+// "Clausper, ..." or "Claude, ..." (whisper spells the name several ways), optional "hey"/"ok".
+const WAKE = /^(?:(?:hey|ok|okay)[,\s]+)?(?:cl[aou]\w*s?p\w*|claude|klaus\w*)[,.:!]?\s+(.+)$/i
 
 // Records until a pause, transcribes, and hands the words to the prompt.
 const listenOnce = async ($: Engine, options: { ask: boolean }) => {
@@ -280,7 +290,21 @@ const listenOnce = async ($: Engine, options: { ask: boolean }) => {
   }
   await update($, isListening, () => true)
   const mode = await read($, listenMode)
-  const wav = `/tmp/clausper-${Date.now()}.wav`
+  const needsWake = await read($, wake)
+  // A private folder (mktemp -d creates it 0700) holds the one recording.
+  let dir = ''
+  try {
+    const made = await $.process.run(['mktemp', '-d', '-t', 'clausper'], { timeoutMs: 5000 })
+    dir = made.stdout.trim()
+  } catch {
+    dir = ''
+  }
+  if (dir === '') {
+    await update($, isListening, () => false)
+    $.ui.toast('Clausper could not create a private folder for the recording')
+    return
+  }
+  const wav = `${dir}/take.wav`
   try {
     if (options.ask) await speak($, 'What next?')
     $.ui.status('Clausper: listening…')
@@ -342,13 +366,17 @@ const listenOnce = async ($: Engine, options: { ask: boolean }) => {
     }
 
     await update($, heard, () => text)
-    if (mode === 'fill') {
-      const filled = await $.prompt.fill({ text, mode: 'replace' })
-      await speak($, filled.isFilled ? "It's in the prompt. Press enter to send." : 'I could not reach the prompt box.')
+    const woke = WAKE.exec(text)
+    const words = woke ? (woke[1] ?? text).trim() : text
+    const mayAutoSend = mode !== 'fill' && (!needsWake || woke !== null)
+    if (!mayAutoSend) {
+      const filled = await $.prompt.fill({ text: words, mode: 'replace' })
+      const why = mode === 'fill' ? "It's in the prompt. Press enter to send." : 'In the prompt. Start with "Clausper" to send by voice.'
+      await speak($, filled.isFilled ? why : 'I could not reach the prompt box.')
       return
     }
-    $.ui.toast(`Clausper heard: ${clip(text, 80)}`)
-    await $.prompt.submit({ text, asUser: true })
+    $.ui.toast(`Clausper heard: ${clip(words, 80)}`)
+    await $.prompt.submit({ text: words, asUser: true })
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     $.ui.toast(`Clausper could not listen: ${reason}`)
@@ -358,9 +386,9 @@ const listenOnce = async ($: Engine, options: { ask: boolean }) => {
     await update($, caption, () => null)
     await update($, isListening, () => false)
     try {
-      await $.process.run(['rm', '-f', wav], { timeoutMs: 3000 })
+      await $.process.run(['rm', '-rf', dir], { timeoutMs: 3000 })
     } catch {
-      // the temp file is gone already
+      // the folder is gone already
     }
   }
 }
@@ -405,7 +433,8 @@ const digest = async ($: Engine, id: string, answer: string) => {
   const lead = clip(leadOf(plain), 220)
   await patchTurn($, id, { lead, headline: clip(lead, 60) })
   const leadSpoken = muted ? Promise.resolve() : speak($, lead)
-  const summary = await summarize($, answer, plain, lead)
+  const offline = await read($, isPrivate)
+  const summary = offline ? fallbackSummary(plain, lead) : await summarize($, answer, plain, lead)
   const finished = await $.clock.now()
   const summaryMs = finished - started
   await patchTurn($, id, { ...summary, summaryMs })
@@ -468,7 +497,7 @@ const kindMark = (change: Change) =>
   change.kind === 'write' ? '+' : change.kind === 'ran' ? '$' : '±'
 
 const USAGE =
-  'Usage: /clausper [mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | setup | voice <name> | voices | test]'
+  'Usage: /clausper [mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | setup | voice <name> | voices | test]'
 
 // ---------------------------------------------------------------- register
 
@@ -495,12 +524,16 @@ export const register: Register = on => {
     await $.command.register({
       name: 'clausper',
       description:
-        'Clausper: open the pane; or mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | setup | voice <name> | voices | test',
+        'Clausper: open the pane; or mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | setup | voice <name> | voices | test',
     })
     const stored = await $.store.get('listenMode')
     if (stored === 'auto' || stored === 'fill' || stored === 'off') {
       await update($, listenMode, () => stored)
     }
+    const storedWake = await $.store.get('wake')
+    if (typeof storedWake === 'boolean') await update($, wake, () => storedWake)
+    const storedPrivate = await $.store.get('private')
+    if (typeof storedPrivate === 'boolean') await update($, isPrivate, () => storedPrivate)
     void $.ui.open({ id: PANE, title: 'Clausper' })
 
     return next(e)
@@ -548,6 +581,26 @@ export const register: Register = on => {
         if (choice !== '') return { text: USAGE }
         later($, () => listenOnce($, { ask: false }))
         return { text: 'Listening… speak, then pause.' }
+      }
+      case 'wake': {
+        const isOn = arg.toLowerCase() !== 'off'
+        await $.store.set('wake', isOn)
+        await update($, wake, () => isOn)
+        return {
+          text: isOn
+            ? 'Wake word on: in auto mode only a sentence that starts with "Clausper" (or "Claude") is sent; anything else goes to the prompt box.'
+            : 'Wake word off: in auto mode everything heard is sent as your prompt. Anyone your microphone can hear can talk to Claude Code.',
+        }
+      }
+      case 'private': {
+        const isOn = arg.toLowerCase() !== 'off'
+        await $.store.set('private', isOn)
+        await update($, isPrivate, () => isOn)
+        return {
+          text: isOn
+            ? 'Private mode on: no model call is made. Clausper speaks the opening sentences of each reply instead of a summary.'
+            : 'Private mode off: long replies are summarized by Haiku through your session.',
+        }
       }
       case 'setup': {
         const ears = await findEars($)
@@ -664,6 +717,8 @@ export const register: Register = on => {
     const listening = await read($, isListening)
     const saying = await read($, caption)
     const ears = await read($, listenMode)
+    const wakeOn = await read($, wake)
+    const privateOn = await read($, isPrivate)
     const lastHeard = await read($, heard)
     const listenNote = await read($, lastListen)
     const now = await $.clock.now()
@@ -684,7 +739,7 @@ export const register: Register = on => {
         <Box gap={1}>
           <Text bold>Clausper</Text>
           <Text dimColor>{state}</Text>
-          <Text dimColor>· ears {ears}</Text>
+          <Text dimColor>· ears {ears}{wakeOn && ears === 'auto' ? ' · wake' : ''}{privateOn ? ' · private' : ''}</Text>
         </Box>
         <Box gap={1} flexWrap="wrap">
           <Button key="mute" hotkey="m" plain onPress={() => update($, isMuted, value => !value)}>

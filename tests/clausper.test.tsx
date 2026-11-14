@@ -183,11 +183,13 @@ test('subagent turns and empty answers are ignored', async ($, on) => {
   await ui.unmount()
 })
 
-test('listening records, transcribes, and submits the words as the prompt', async ($, on) => {
+test('listening: the wake word decides between sending and filling the prompt', async ($, on) => {
   const spoken: string[] = []
   const { clock } = engine(on, spoken)
   const submitted: string[] = []
-  on('env.get', () => ({ value: '/home/ken' }))
+  const filled: string[] = []
+  let transcript = ' Add a readme file and commit it.\n'
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/ken' : undefined }))
   on('fs.exists', () => ({ value: true }))
   on('fs.stat', () => ({ value: { size: 44 + 32000 * 3, isFile: true, isDirectory: false, mtimeMs: 0 } }))
   on('audio.play', () => ({ value: undefined }))
@@ -195,22 +197,57 @@ test('listening records, transcribes, and submits the words as the prompt', asyn
     submitted.push(e.text)
     return { text: e.text }
   })
+  on('prompt.fill', (_, e) => {
+    filled.push(e.text)
+    return { isFilled: true }
+  })
   on('process.run', (_, e) => {
     const [cmd = ''] = e.argv
-    if (cmd === 'which') return { value: { exitCode: 0, stdout: `/opt/homebrew/bin/${e.argv[1]}\n`, stderr: '' } }
-    if (cmd.endsWith('whisper-cli')) return { value: { exitCode: 0, stdout: ' Add a readme file and commit it.\n', stderr: '' } }
+    if (cmd === 'mktemp') return { value: { exitCode: 0, stdout: '/tmp/clausper.abc\n', stderr: '' } }
+    if (cmd.endsWith('whisper-cli')) return { value: { exitCode: 0, stdout: transcript, stderr: '' } }
     return { value: { exitCode: 0, stdout: '', stderr: '' } }
   })
+  const run = (args: string) =>
+    $.command.run({ command: 'clausper', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false } })
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await $.command.run({ command: 'clausper', args: 'listen auto', origin: { kind: 'composer' }, presentation: { isFullscreen: false } })
-  await $.command.run({ command: 'clausper', args: 'listen', origin: { kind: 'composer' }, presentation: { isFullscreen: false } })
-  await clock.advance(1)
+  await run('listen auto')
 
-  expect(submitted).toEqual(['Add a readme file and commit it.'])
+  // No wake word: the words land in the prompt box, nothing is sent.
+  await run('listen')
+  await clock.advance(1)
+  expect(submitted).toEqual([])
+  expect(filled).toEqual(['Add a readme file and commit it.'])
+
+  // With the wake word: sent, and the wake word stripped.
+  transcript = ' Clausper, add a readme file and commit it.\n'
+  await run('listen')
+  await clock.advance(1)
+  expect(submitted).toEqual(['add a readme file and commit it.'])
+
+  // Wake word off: everything heard is sent.
+  transcript = ' Run the tests.\n'
+  await run('wake off')
+  await run('listen')
+  await clock.advance(1)
+  expect(submitted).toEqual(['add a readme file and commit it.', 'Run the tests.'])
+
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /last listen/ }))?.text).toContain('Heard 3.0 s')
   await ui.unmount()
+})
+
+test('private mode makes no model call and speaks the reply itself', async ($, on) => {
+  const spoken: string[] = []
+  const { clock, calls } = engine(on, spoken)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'clausper', args: 'private on', origin: { kind: 'composer' }, presentation: { isFullscreen: false } })
+  await $.turn.start({ text: 'build', turnId: 'p1' })
+  await $.turn.complete({ answer: LONG_REPLY, durationMs: 10, isAborted: false, turnId: 'p1', reason: 'answer' })
+  await clock.advance(1)
+  expect(calls.model).toBe(0)
+  expect(spoken[0]).toBe(LEAD)
+  expect(spoken[1]).toContain('I wrote the hooks module')
 })
 
 test('setup reports what listening needs, and listen mode is remembered', async ($, on) => {
