@@ -50,6 +50,7 @@ const engine = (on: On, spoken: string[], completion: ModelCompleteResult = ANSW
   on('command.register', () => ({ value: { command: 'clausper' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.panes', () => ({ value: [] }))
+  on('session.cwd', () => ({ value: '/' }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.status', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))

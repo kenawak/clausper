@@ -74,30 +74,37 @@ recordings never leave the machine.
 where noted.
 
 - The macOS speech synthesizer, through Claude Code's own speech call, to speak summaries.
-- `killall -u <your user> say`, when you press stop, to end the current utterance.
+- `killall -u <your user> say`, when you press stop. This ends every `say` of yours, not only Clausper's.
 - `say -v ?`, for `/clausper voices`, to list installed voices.
-- `mktemp -d`, when listening, to create a private folder (mode 0700) for the one recording.
+- `mktemp -d`, when listening, to create a private folder (mode 0700, under your temporary
+  directory) for the one recording.
 - `rec` (sox), when listening, to record 16 kHz mono from the default microphone until a pause,
   into that folder. The recorder is looked up only in `/opt/homebrew/bin`, `/usr/local/bin` and
-  `/usr/bin`, or at the path in `CLAUSPER_RECORDER`; PATH is never searched.
+  `/usr/bin`, or at the path in `CLAUSPER_RECORDER`; PATH is never searched. An override must be
+  an absolute path outside your temporary folder and outside the session's project folder.
 - `whisper-cli` (whisper.cpp), found the same way or at `CLAUSPER_WHISPER`, to transcribe that
   file with the model in `~/.clausper/models` or the file named by `CLAUSPER_WHISPER_MODEL`.
 - `rm -rf` on that one private folder afterwards, success or failure.
-- `git diff -- <file>` and `git status --porcelain -- <file>`, run in the file's folder, when you
-  press a file in the pane, to show its uncommitted changes.
-- `open <file>`, when you press "open in editor".
+- `git diff --no-ext-diff -- <file>` and `git status --porcelain -- <file>`, run in the file's
+  folder with external diff tools and the file monitor disabled, when you press a file in the pane.
+- `code --goto <file>` when VS Code's command is installed in `/opt/homebrew/bin` or
+  `/usr/local/bin`, else `open -t <file>` (your default text editor), when you press "open in
+  editor". Never plain `open`, which would launch a script or app instead of showing it.
 
 **Prompts it submits.** In listen mode, after you speak, Clausper submits the transcribed words as
-your next message, verbatim and unedited, marked as coming from the plugin. With the wake word on
-(the default) that happens only when the sentence starts with "Clausper" or "Claude"; otherwise,
-and always in fill mode, the words are placed in the prompt box and you press enter. Saying
-"cancel", "nothing" or "skip" submits nothing.
+your next message, as whisper transcribed them. The only edits are the removal of the wake word
+and of whisper's own non-speech tags such as "[BLANK_AUDIO]". With the wake word on (the default)
+a sentence is sent only when it starts with "Clausper" (or a spelling whisper produces for it) or
+"Claude", lasts at least a second, and fewer than three voice turns have been sent in a row
+without you typing; otherwise, and always in fill mode, the words are appended to the prompt box
+and you press enter. Saying "cancel", "nothing" or "skip" submits nothing. The prompt is tagged as
+coming from the plugin for Claude Code's hooks and transcript; the model reads it as your words.
 
 **What it reads.** The environment variables `HOME`, `USER`, `CLAUSPER_WHISPER_MODEL`,
 `CLAUSPER_RECORDER` and `CLAUSPER_WHISPER`, the reply text,
 the paths and commands of tool calls in your session, and files you choose to open from the pane.
-It reads no credentials, keys or tokens, and stores only its own settings (voice, listen mode) in
-the plugin store Claude Code provides.
+It reads no credentials, keys or tokens, and stores only its own settings (voice, listen mode,
+wake word, private mode) in the plugin store Claude Code provides.
 
 Security: [SECURITY.md](SECURITY.md). Privacy: [PRIVACY.md](PRIVACY.md). Terms: [TERMS.md](TERMS.md).
 

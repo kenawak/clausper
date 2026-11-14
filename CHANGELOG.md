@@ -2,6 +2,25 @@
 
 All notable changes to Clausper. Dates are when the change shipped to the mod.
 
+## 0.3.1 — 2026-11-14
+
+Fixes from an independent adversarial review of the whole source.
+
+### Security
+- "Open in editor" uses `code --goto` or `open -t`, never plain `open`, so a file Claude wrote is shown in a text editor and never launched by its handler.
+- The wake word matches only "Clausper", the spellings whisper produces for it, or "Claude". The previous pattern also accepted words such as "clamp" and "clap".
+- The `CLAUSPER_RECORDER`, `CLAUSPER_WHISPER` and `CLAUSPER_WHISPER_MODEL` overrides must be absolute paths outside the temporary folder and the session's project folder. Without a `HOME`, Clausper refuses to listen.
+- Two brakes on runaway voice sessions: captures under a second are never auto-sent, and after three voice turns in a row without a typed prompt Clausper falls back to the prompt box.
+- The summary prompt neutralizes `</reply>` tags and quotes from the reply and tells the model to treat it as text.
+- `git diff` and `git status` run with external diff tools and the file monitor disabled, and the diff shown is capped at 100,000 characters.
+
+### Fixed
+- Transcripts keep what you said: only whisper's non-speech tags are removed, not every parenthesis. "Clausper, cancel" now cancels instead of being sent, and a bare "no" is submitted as an answer instead of being swallowed.
+- Mute silences listen-mode prompts too. Fill never overwrites a draft; it appends.
+- A reload during a listen no longer leaves the mod stuck in "listening". A failed summary clears the status line.
+- `mktemp` is called with a template GNU mktemp also accepts, so listening can work on Linux.
+- Vercel link files that had slipped into the repository are removed.
+
 ## 0.3.0 — 2026-11-14
 
 ### Security
