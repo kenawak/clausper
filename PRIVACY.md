@@ -1,6 +1,6 @@
 # Privacy policy
 
-Last updated 12 November 2026. Questions: open an issue at https://github.com/kenawak/clausper/issues.
+Last updated 14 November 2026. Questions: open an issue at https://github.com/kenawak/clausper/issues.
 
 ## The short version
 
@@ -9,7 +9,7 @@ Clausper runs on your computer. Your voice, your recordings and the files it sho
 ## What the mod processes
 
 - **Reply text.** After each turn, Clausper reads the reply Claude Code just produced. Short replies are spoken as they are. Long replies are sent, with a fixed summarizing instruction, through your Claude Code session to the Anthropic API your session is already using. That call is subject to Anthropic's own privacy terms for your account. Clausper adds no other recipient.
-- **Speech.** Summaries are spoken by the macOS system voice on your machine. Nothing is sent to a speech service.
+- **Speech.** Summaries are spoken by the macOS system voice on your machine, or by the optional Kokoro voice, a model that also runs on your machine. Nothing is sent to a speech service. Kokoro's audio is written into a private temporary folder, played, and deleted.
 - **Microphone.** In listen mode, after you turn it on, Clausper records from your default microphone until you pause, writes the audio into a private folder it creates in your temporary directory, transcribes it with whisper.cpp running locally, submits the words as your next prompt (or places them in the prompt box), and deletes the folder. Recording only happens after you enable listen mode or press listen. macOS asks for microphone permission the first time.
 - **Files and commands.** The pane lists the paths of files Claude edited and the commands it ran in your session, and shows a file's git diff or contents when you ask. This stays on your machine.
 - **Settings.** Your chosen voice, listen mode, wake-word and private-mode switches are stored in the plugin store Claude Code provides on your machine.
@@ -18,8 +18,8 @@ Clausper runs on your computer. Your voice, your recordings and the files it sho
 
 - No telemetry, crash reporting, or usage analytics.
 - No accounts, cookies, or identifiers.
-- No reading of credentials, keys or tokens. It reads five environment variables: `HOME` and `USER`, and the optional `CLAUSPER_WHISPER_MODEL`, `CLAUSPER_RECORDER` and `CLAUSPER_WHISPER` overrides.
-- No network calls of its own. The only outbound request is the summary call made through Claude Code.
+- No reading of credentials, keys or tokens. It reads six environment variables: `HOME` and `USER`, and the optional `CLAUSPER_WHISPER_MODEL`, `CLAUSPER_RECORDER`, `CLAUSPER_WHISPER` and `CLAUSPER_UV` overrides.
+- No network calls of its own. The only outbound request is the summary call made through Claude Code, and, only when you run `/clausper voice install`, uv's download of the Kokoro voice's pinned packages from PyPI (PyPI sees your IP address, under its own privacy policy).
 
 ## The website
 

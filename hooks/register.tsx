@@ -171,17 +171,262 @@ const voiceOptions = async ($: Engine) => {
   return typeof voice === 'string' && voice !== '' ? { voice } : undefined
 }
 
-// Speaks sentence by sentence so the caption follows the voice.
-const speak = async ($: Engine, text: string) => {
-  const words = text.trim().slice(0, 4000)
-  if (words === '') return
+// ---------------------------------------------------------------- kokoro voice
+
+// Kokoro is a local neural voice, far more natural than the system one. The
+// runner is this plugin's own tts/kokoro.py, run by uv with the packages pinned,
+// with hashes, in tts/kokoro.py.lock. Speaking runs uv with --offline, so it
+// never touches the network; only /clausper voice install fetches the packages.
+const KOKORO_MODELS = ['kokoro-v1.0.onnx', 'kokoro-v1.0.fp16.onnx', 'kokoro-v1.0.int8.onnx']
+const KOKORO_VOICES_FILE = 'voices-v1.0.bin'
+const KOKORO_DEFAULT = 'af_heart'
+// The English voices in voices-v1.0.bin: a American, b British; f female, m male.
+const KOKORO_VOICES = [
+  'af_alloy', 'af_aoede', 'af_bella', 'af_heart', 'af_jessica', 'af_kore', 'af_nicole', 'af_nova',
+  'af_river', 'af_sarah', 'af_sky', 'am_adam', 'am_echo', 'am_eric', 'am_fenrir', 'am_liam',
+  'am_michael', 'am_onyx', 'am_puck', 'am_santa', 'bf_alice', 'bf_emma', 'bf_isabella', 'bf_lily',
+  'bm_daniel', 'bm_fable', 'bm_george', 'bm_lewis',
+]
+// The first clip waits for uv, Python and the model to load; later ones only for synthesis.
+const KOKORO_FIRST_CLIP_MS = 45000
+const KOKORO_NEXT_CLIP_MS = 20000
+
+type Kokoro = { uv: string | null; model: string | null; voices: string | null }
+type KokoroReady = { uv: string; model: string; voices: string }
+
+const kokoroVoice = async ($: Engine) => {
+  const voice = await $.store.get('kokoroVoice')
+  return typeof voice === 'string' && KOKORO_VOICES.includes(voice) ? voice : null
+}
+
+// uv from the package managers' folders or uv's own installer folder, never PATH;
+// the model files only from ~/.clausper/models.
+const findKokoro = async ($: Engine): Promise<Kokoro> => {
+  const home = await $.env.get('HOME')
+  if (home === undefined || !home.startsWith('/')) return { uv: null, model: null, voices: null }
+  const cwd = await $.session.cwd()
+  const uvOverride = await $.env.get('CLAUSPER_UV')
+  const uv = await firstPresent($, ['uv'], ['/opt/homebrew/bin', '/usr/local/bin', `${home}/.local/bin`], uvOverride, cwd)
+  const dir = `${home}/.clausper/models`
+  let model: string | null = null
+  for (const name of KOKORO_MODELS) {
+    const isThere = await $.fs.exists(`${dir}/${name}`)
+    if (isThere) {
+      model = `${dir}/${name}`
+      break
+    }
+  }
+  const hasVoices = await $.fs.exists(`${dir}/${KOKORO_VOICES_FILE}`)
+  return { uv, model, voices: hasVoices ? `${dir}/${KOKORO_VOICES_FILE}` : null }
+}
+
+const isKokoroReady = (kit: Kokoro): kit is KokoroReady => kit.uv !== null && kit.model !== null && kit.voices !== null
+
+const runnerArgs = ($: Engine, kit: KokoroReady) => [
+  kit.uv, 'run', '--offline', '--locked', '--no-config', '--quiet',
+  '--script', `${$.plugin.root}/tts/kokoro.py`,
+  '--model', kit.model, '--voices', kit.voices,
+]
+
+// The failure the person last heard about: each new one is toasted once.
+let lastFallback = ''
+const noteFallback = ($: Engine, reason: string) => {
+  $.ui.log(`clausper: kokoro voice failed: ${reason}`, { to: 'debug' })
+  if (reason === lastFallback) return
+  lastFallback = reason
+  $.ui.toast(`Clausper: the Kokoro voice failed (${clip(reason, 80)}); using the system voice. See /clausper setup.`)
+}
+
+// One Kokoro run for one utterance. The runner prints each clip's path as it is
+// written, so the first sentence plays while the next is still being made.
+type Synthesis = {
+  /** The clip for sentence `index`, or null once the run ended, failed or was cancelled without it. */
+  clip: (index: number) => Promise<string | null>
+  /** Why the run ended short, or null. */
+  failure: () => string | null
+  /** Ends the run: the runner is killed and every waiting `clip` resolves null. */
+  cancel: () => void
+  /** Cancels, then deletes the private folder that held the clips. */
+  dispose: () => Promise<void>
+}
+
+// Every run not yet disposed, prepared or speaking: a session that ends deletes their folders.
+const liveSyntheses = new Set<Synthesis>()
+
+const startSynthesis = async ($: Engine, sentences: string[], voice: string): Promise<Synthesis | null> => {
+  const kit = await findKokoro($)
+  if (!isKokoroReady(kit)) {
+    noteFallback($, kit.uv === null ? 'uv is not installed' : 'the model files are not in ~/.clausper/models')
+    return null
+  }
+  // A private folder (mktemp -d creates it 0700) holds this utterance's clips.
+  let dir = ''
+  try {
+    const made = await $.process.run(['mktemp', '-d', '-t', 'clausper.XXXXXXXX'], { timeoutMs: 5000 })
+    dir = made.stdout.trim()
+  } catch {
+    dir = ''
+  }
+  if (dir === '') {
+    noteFallback($, 'no private folder for the audio')
+    return null
+  }
+
+  const stream = $.process.spawn({
+    argv: [...runnerArgs($, kit), '--voice', voice, '--out', dir],
+    cwd: dir,
+    env: { PYTHONPATH: '' },
+    input: `${sentences.map(sentence => sentence.replace(/\s+/g, ' ')).join('\n')}\n`,
+  })
+  let ready = 0
+  let isOver = false
+  let isCancelled = false
+  let failure: string | null = null
+  let waiters: Array<() => void> = []
+  const wakeAll = () => {
+    const woken = waiters
+    waiters = []
+    for (const wake of woken) wake()
+  }
+  const cancel = () => {
+    if (isCancelled) return
+    isCancelled = true
+    wakeAll()
+    // Ending the stream kills the runner.
+    stream.return({ code: null, signal: null }).catch(() => undefined)
+  }
+
+  void (async () => {
+    let line = ''
+    let stderr = ''
+    try {
+      for await (const chunk of stream) {
+        if (isCancelled) break
+        if (chunk.stream === 'stderr') {
+          stderr = (stderr + chunk.text).slice(-800)
+          continue
+        }
+        // Only the count of finished lines is used: each clip's path is ours, not the runner's.
+        const lines = (line + chunk.text).split('\n')
+        line = lines.pop() ?? ''
+        ready += lines.filter(one => one.trim() !== '').length
+        wakeAll()
+      }
+      if (!isCancelled) {
+        const ended = await stream.result
+        if (ended.code !== 0) {
+          const lastLine = stderr.trim().split('\n').pop() ?? ''
+          failure = lastLine !== '' ? lastLine : `the runner exited with ${ended.code ?? ended.signal}`
+        }
+      }
+    } catch (error) {
+      if (!isCancelled) failure = error instanceof Error ? error.message : String(error)
+    } finally {
+      isOver = true
+      wakeAll()
+    }
+  })()
+
+  const synthesis: Synthesis = {
+    clip: async index => {
+      const timer = $.clock.after(index === 0 ? KOKORO_FIRST_CLIP_MS : KOKORO_NEXT_CLIP_MS, () => {
+        if (ready > index || isOver) return
+        failure = 'the voice runner timed out'
+        cancel()
+      })
+      try {
+        while (ready <= index && !isOver && !isCancelled) {
+          await new Promise<void>(resolve => waiters.push(resolve))
+        }
+      } finally {
+        timer.cancel()
+      }
+      return index < ready && !isCancelled ? `${dir}/${String(index + 1).padStart(3, '0')}.wav` : null
+    },
+    failure: () => failure ?? (isOver && !isCancelled && ready < sentences.length ? 'the voice runner stopped early' : null),
+    cancel,
+    dispose: async () => {
+      cancel()
+      liveSyntheses.delete(synthesis)
+      try {
+        await $.process.run(['rm', '-rf', dir], { timeoutMs: 3000 })
+      } catch {
+        // the folder is gone already
+      }
+    },
+  }
+  liveSyntheses.add(synthesis)
+  return synthesis
+}
+
+// What to say, split for captions, with its Kokoro audio started ahead if that
+// voice is chosen. Preparing the next utterance while one plays hides the
+// runner's start-up time.
+type Utterance = { sentences: string[]; synthesis: Promise<Synthesis | null> | null }
+
+const prepare = async ($: Engine, text: string): Promise<Utterance> => {
+  const sentences = sentencesOf(text.trim().slice(0, 4000))
+  const voice = await kokoroVoice($)
+  const synthesis = voice === null || sentences.length === 0 ? null : startSynthesis($, sentences, voice)
+  return { sentences, synthesis }
+}
+
+// The runs being spoken now, cancelled by stop; prepared runs wait their turn.
+const speaking = new Set<Synthesis>()
+// The engine queues utterances but not clips: each clip waits for the one before.
+let clipChain: Promise<void> = Promise.resolve()
+let playback: AbortController | null = null
+
+const playClip = async ($: Engine, path: string, sentence: string, generation: number) => {
+  const bytes = await $.fs.read(path, { as: 'bytes' })
+  const before = clipChain
+  let finished = () => {}
+  clipChain = new Promise<void>(resolve => {
+    finished = resolve
+  })
+  try {
+    await before
+    if (generation !== speakGeneration) return
+    await update($, caption, () => sentence)
+    const control = new AbortController()
+    playback = control
+    await $.audio.play({ base64: bytes.base64, mime: 'audio/wav' }, { signal: control.signal })
+  } finally {
+    finished()
+  }
+}
+
+// Speaks sentence by sentence so the caption follows the voice: Kokoro when it
+// is chosen and set up, the system voice otherwise or for whatever Kokoro could not say.
+const speak = async ($: Engine, what: string | Utterance) => {
+  const utterance = typeof what === 'string' ? await prepare($, what) : what
+  const { sentences } = utterance
+  if (sentences.length === 0) return
   speakGeneration += 1
   const generation = speakGeneration
-  const voice = await voiceOptions($)
   await update($, isSpeaking, () => true)
+  const synthesis = utterance.synthesis === null ? null : await utterance.synthesis
+  let index = 0
   try {
-    for (const sentence of sentencesOf(words)) {
-      if (generation !== speakGeneration) break
+    if (synthesis !== null) {
+      speaking.add(synthesis)
+      for (; index < sentences.length && generation === speakGeneration; index += 1) {
+        const path = await synthesis.clip(index)
+        if (path === null) break
+        try {
+          await playClip($, path, sentences[index] ?? '', generation)
+        } catch (error) {
+          // A clip that cannot be read or played: the system voice says it and the rest.
+          noteFallback($, error instanceof Error ? error.message : String(error))
+          break
+        }
+      }
+      const failure = synthesis.failure()
+      if (failure !== null && generation === speakGeneration) noteFallback($, failure)
+    }
+    const voice = await voiceOptions($)
+    for (; index < sentences.length && generation === speakGeneration; index += 1) {
+      const sentence = sentences[index] ?? ''
       await update($, caption, () => sentence)
       await $.audio.speak(sentence, voice)
     }
@@ -190,6 +435,10 @@ const speak = async ($: Engine, text: string) => {
     $.ui.toast(`Clausper could not speak: ${reason}`)
     $.ui.log(`clausper: speech failed: ${reason}`, { to: 'debug' })
   } finally {
+    if (synthesis !== null) {
+      speaking.delete(synthesis)
+      await synthesis.dispose()
+    }
     if (generation === speakGeneration) {
       await update($, caption, () => null)
       await update($, isSpeaking, () => false)
@@ -213,6 +462,9 @@ const sayUnlessMuted = async ($: Engine, text: string) => {
 
 const stopSpeaking = async ($: Engine) => {
   speakGeneration += 1
+  playback?.abort()
+  playback = null
+  for (const synthesis of speaking) synthesis.cancel()
   try {
     const user = await $.env.get('USER')
     await $.process.run(user ? ['killall', '-u', user, 'say'] : ['killall', 'say'], { timeoutMs: 3000 })
@@ -274,6 +526,66 @@ const findEars = async ($: Engine): Promise<Ears> => {
     recorder: await firstPresent($, ['rec'], dirs, recorderOverride, cwd),
     whisper: await firstPresent($, ['whisper-cli', 'whisper-cpp'], dirs.slice(0, 2), whisperOverride, cwd),
     model: hasModel ? modelPath : null,
+  }
+}
+
+// Whether uv has the runner's pinned packages: a full offline run that loads the
+// model and lists its voices, so a pass means Kokoro will speak.
+const kokoroPackages = async ($: Engine, kit: Kokoro) => {
+  if (!isKokoroReady(kit)) return 'not checked: install uv and the model files first'
+  try {
+    const home = (await $.env.get('HOME')) ?? '/'
+    const listed = await $.process.run([...runnerArgs($, kit), '--list'], {
+      cwd: home,
+      env: { PYTHONPATH: '' },
+      timeoutMs: 30000,
+    })
+    if (listed.exitCode === 0 && listed.stdout.includes(KOKORO_DEFAULT)) return 'installed'
+  } catch {
+    // uv could not start or timed out: report as missing
+  }
+  return 'missing  → /clausper voice install (fetches the pinned packages once, about 130 MB)'
+}
+
+const voiceReport = (kit: Kokoro, packages: string, chosen: string | null) =>
+  [
+    `voice: ${chosen === null ? 'system  (for a natural voice: /clausper voice kokoro)' : `Kokoro ${chosen}`}`,
+    `uv (runs Kokoro): ${kit.uv ?? 'missing  → brew install uv (or set CLAUSPER_UV)'}`,
+    `Kokoro model: ${kit.model ?? `missing  → save ${KOKORO_MODELS[0]} to ~/.clausper/models/ (see the README)`}`,
+    `Kokoro voices: ${kit.voices ?? `missing  → save ${KOKORO_VOICES_FILE} to ~/.clausper/models/ (see the README)`}`,
+    `Kokoro packages: ${packages}`,
+  ].join('\n')
+
+// Fetches the runner's packages, exactly as pinned with hashes in tts/kokoro.py.lock,
+// into uv's cache. The only time Clausper's voice touches the network, and only on request.
+const installKokoro = async ($: Engine) => {
+  const kit = await findKokoro($)
+  if (kit.uv === null) {
+    $.ui.toast('Clausper: install uv first (brew install uv), then run /clausper voice install again')
+    return
+  }
+  $.ui.status('Clausper: installing the Kokoro voice…')
+  try {
+    const synced = await $.process.run(
+      [kit.uv, 'sync', '--script', `${$.plugin.root}/tts/kokoro.py`, '--locked', '--no-config', '--quiet'],
+      { cwd: (await $.env.get('HOME')) ?? '/', env: { PYTHONPATH: '' }, timeoutMs: 600000 },
+    )
+    if (synced.exitCode !== 0) {
+      const reason = synced.stderr.trim().split('\n').pop() ?? `exit ${synced.exitCode}`
+      $.ui.toast(`Clausper: the Kokoro install failed: ${clip(reason, 120)}`)
+      $.ui.log(`clausper: uv sync failed: ${synced.stderr.slice(-800)}`, { to: 'debug' })
+      return
+    }
+    lastFallback = ''
+    const ready = isKokoroReady(kit)
+    $.ui.toast(
+      ready
+        ? 'Clausper: the Kokoro voice is installed.'
+        : 'Clausper: the Kokoro packages are installed; the model files are still missing (see /clausper setup).',
+    )
+    if (ready && (await kokoroVoice($)) !== null) await speak($, 'The Kokoro voice is ready. This is how I will sound from now on.')
+  } finally {
+    $.ui.status(undefined)
   }
 }
 
@@ -475,8 +787,10 @@ const digestInner = async ($: Engine, id: string, answer: string) => {
   await patchTurn($, id, { ...summary, summaryMs })
   $.ui.status(undefined)
   $.ui.log(`clausper: summary in ${summaryMs} ms (${summary.status})`, { to: 'debug' })
+  // Start the summary's audio while the lead is still playing, so it follows without a gap.
+  const rest = muted ? null : await prepare($, [summary.spoken, summary.asks].filter(part => part !== '').join(' '))
   await leadSpoken
-  if (!muted) await speak($, [summary.spoken, summary.asks].filter(part => part !== '').join(' '))
+  if (rest !== null) await speak($, rest)
   await afterSpeaking($)
 }
 
@@ -547,7 +861,7 @@ const kindMark = (change: Change) =>
   change.kind === 'write' ? '+' : change.kind === 'ran' ? '$' : '±'
 
 const USAGE =
-  'Usage: /clausper [mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | setup | voice <name> | voices | test]'
+  'Usage: /clausper [mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | setup | voice <name>|kokoro|install | voices | test]'
 
 // ---------------------------------------------------------------- register
 
@@ -574,7 +888,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'clausper',
       description:
-        'Clausper: open the pane; or mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | setup | voice <name> | voices | test',
+        'Clausper: open the pane; or mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | setup | voice <name>|kokoro|install | voices | test',
     })
     const stored = await $.store.get('listenMode')
     if (stored === 'auto' || stored === 'fill' || stored === 'off') {
@@ -657,19 +971,51 @@ export const register: Register = on => {
       case 'setup': {
         const ears = await findEars($)
         const ready = ears.recorder !== null && ears.whisper !== null && ears.model !== null
+        const kit = await findKokoro($)
+        const packages = await kokoroPackages($, kit)
+        const chosen = await kokoroVoice($)
+        const speaks = packages === 'installed'
         return {
-          text: `${earsReport(ears)}\n\n${
+          text: `Listening\n${earsReport(ears)}\n${
             ready
               ? 'Ready to listen. Try /clausper listen, or turn it on after every reply with /clausper listen auto.'
               : 'Install what is missing, then run /clausper setup again.'
+          }\n\nVoice\n${voiceReport(kit, packages, chosen)}\n${
+            speaks
+              ? chosen === null
+                ? 'Kokoro is ready. Turn it on with /clausper voice kokoro.'
+                : 'Kokoro is ready and speaking.'
+              : 'The system voice speaks until Kokoro is set up (optional).'
           }`,
         }
       }
       case 'voice': {
-        if (arg === '' || arg === 'default') {
+        const [first = '', second = ''] = arg.toLowerCase().split(/\s+/)
+        if (arg === '' || first === 'default' || first === 'system') {
           await $.store.delete('voice')
+          await $.store.delete('kokoroVoice')
           return { text: 'Clausper will use the system default voice.' }
         }
+        if (first === 'install') {
+          later($, () => installKokoro($))
+          return { text: 'Installing the Kokoro voice packages with uv, once. Clausper will say when it is done.' }
+        }
+        if (first === 'kokoro' || KOKORO_VOICES.includes(first)) {
+          const chosen = first === 'kokoro' ? second || KOKORO_DEFAULT : first
+          if (!KOKORO_VOICES.includes(chosen)) {
+            return { text: `No Kokoro voice ${chosen}. Kokoro voices: ${KOKORO_VOICES.join(', ')}` }
+          }
+          await $.store.set('kokoroVoice', chosen)
+          const name = chosen.slice(3, 4).toUpperCase() + chosen.slice(4)
+          later($, () => speak($, `Hi, this is ${name}. I am Clausper.`))
+          const kit = await findKokoro($)
+          return {
+            text: isKokoroReady(kit)
+              ? `Clausper voice set to Kokoro ${chosen}.`
+              : `Clausper voice set to Kokoro ${chosen}. Kokoro is not set up yet, so the system voice speaks for now: see /clausper setup.`,
+          }
+        }
+        await $.store.delete('kokoroVoice')
         await $.store.set('voice', arg)
         later($, () => speak($, `Hi, this is ${arg}. I am Clausper.`))
         return { text: `Clausper voice set to ${arg}.` }
@@ -681,10 +1027,9 @@ export const register: Register = on => {
           .map(line => line.split(/\s{2,}/)[0]?.trim() ?? '')
           .filter(name => name !== '')
         return {
-          text:
-            names.length === 0
-              ? 'No system voices found.'
-              : `System voices (${names.length}): ${names.join(', ')}\n\nPick one with /clausper voice <name>.`,
+          text: `${
+            names.length === 0 ? 'No system voices found.' : `System voices (${names.length}): ${names.join(', ')}`
+          }\n\nKokoro voices (${KOKORO_VOICES.length}, natural, local; see /clausper setup): ${KOKORO_VOICES.join(', ')}\n\nPick one with /clausper voice <name>.`,
         }
       }
       case 'test':
@@ -694,6 +1039,13 @@ export const register: Register = on => {
         return { text: USAGE }
     }
   })
+
+  // A session that ends mid-utterance ends its Kokoro runs and deletes their audio.
+  // A /clear keeps the process, and what it is saying.
+  on('session.end', async ($, e, next) => {
+    if (e.reason !== 'clear') await Promise.all([...liveSyntheses].map(synthesis => synthesis.dispose()))
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   on('prompt.submit', ($, e, next) => {
     if (e.origin.kind === 'composer') voiceTurns = 0

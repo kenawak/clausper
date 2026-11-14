@@ -1,7 +1,8 @@
 # Clausper
 
 Clausper whispers. After every Claude Code reply it speaks a short summary through your Mac's
-system voice, so you do not have to read a long terminal answer to know what just happened.
+system voice, or through Kokoro, an optional natural-sounding neural voice that also runs on your
+Mac, so you do not have to read a long terminal answer to know what just happened.
 While it speaks, the current sentence shows as a caption above the prompt and in the pane.
 It also keeps a pane beside the chat listing each turn, the files it touched, and the
 commands it ran. Pressing a file shows its uncommitted diff, opens it in your editor, or
@@ -54,6 +55,37 @@ the prompt box instead of sending it, for when you want to check it first. `/cla
 turns it off. Say "cancel" or "nothing" to skip a turn. macOS asks for microphone access the
 first time; allow it for your terminal app.
 
+## A natural voice: Kokoro (optional)
+
+The macOS system voices can sound robotic. Kokoro is an open-weight neural text-to-speech model
+(82 million parameters, Apache 2.0) that sounds close to a person and runs on your Mac's CPU, the
+same way listen mode runs whisper.cpp: nothing you hear is made anywhere else.
+
+    brew install uv
+
+Then download two files from the kokoro-onnx model release,
+https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0, and save them in
+`~/.clausper/models/`:
+
+- `kokoro-v1.0.onnx` (326 MB), or the smaller `kokoro-v1.0.int8.onnx` (92 MB, a little rougher)
+- `voices-v1.0.bin` (28 MB)
+
+Nothing is executed from these downloads: they are data files the model runtime reads.
+
+Then run `/clausper voice install` once. uv downloads the runner's Python packages from PyPI,
+exactly the versions and hashes pinned in `tts/kokoro.py.lock` (kokoro-onnx, onnxruntime, numpy
+and their dependencies, about 130 MB on disk). `/clausper setup` checks every piece.
+
+`/clausper voice kokoro` turns it on with the default voice, `af_heart`. `/clausper voice bm_george`
+picks another: `af_` and `am_` are American female and male voices, `bf_` and `bm_` British;
+`/clausper voices` lists them all. `/clausper voice default` goes back to the system voice.
+
+Each utterance starts `tts/kokoro.py`, a short Python script in this repository. On Apple Silicon
+the first sentence is ready in two to three seconds (the model loading), and each one after it in
+well under a second, while the sentence before it plays. For a long reply the summary's audio is
+made while the opening sentence is spoken. If Kokoro cannot speak, for any reason, the system voice
+says the rest and a toast says why.
+
 ## What Clausper does on your machine
 
 Clausper is a hooks module. This is everything it runs, reads, sends and submits.
@@ -66,9 +98,10 @@ the prompt. It never touches permission modes, settings, other plugins or the mo
 
 **What it sends, and where.** One model call per long reply (none in private mode), through your own Claude Code session
 to the same Anthropic API your session already uses, carrying the text of that reply and a fixed
-instruction to summarize it (the `haiku` model). Short replies are not sent anywhere. No other
-network calls are made by Clausper itself: no telemetry, no third-party service, and your voice
-recordings never leave the machine.
+instruction to summarize it (the `haiku` model). Short replies are not sent anywhere. The one
+other network use is `/clausper voice install`, which you run once for the Kokoro voice: uv
+downloads the pinned packages from PyPI. Speaking never touches the network. No telemetry, no
+third-party service, and your voice recordings never leave the machine.
 
 **Programs it runs, and why.** All are run directly, without a shell, with fixed arguments except
 where noted.
@@ -85,6 +118,17 @@ where noted.
 - `whisper-cli` (whisper.cpp), found the same way or at `CLAUSPER_WHISPER`, to transcribe that
   file with the model in `~/.clausper/models` or the file named by `CLAUSPER_WHISPER_MODEL`.
 - `rm -rf` on that one private folder afterwards, success or failure.
+- `uv run --offline --locked --no-config --script tts/kokoro.py`, when a Kokoro voice is chosen,
+  in its own private `mktemp -d` folder, to turn each sentence into a WAV file there that Claude
+  Code's own audio call plays; the folder is deleted afterwards. `--offline`: speaking never
+  touches the network. `--locked`: only the packages pinned with hashes in `tts/kokoro.py.lock`
+  run. `--no-config`: a `uv.toml` or `pyproject.toml` in your project cannot change where
+  packages come from. uv is looked up only in `/opt/homebrew/bin`, `/usr/local/bin` and
+  `~/.local/bin` (where uv's own installer puts it), or at `CLAUSPER_UV` under the same rules as
+  the other overrides; the model files only in `~/.clausper/models`. `/clausper setup` runs the
+  same command with `--list` to check that Kokoro can load. Stop ends the playback and the runner.
+- `uv sync --script tts/kokoro.py --locked --no-config`, only when you run `/clausper voice
+  install`, to download those pinned packages into uv's cache.
 - `git diff --no-ext-diff -- <file>` and `git status --porcelain -- <file>`, run in the file's
   folder with external diff tools and the file monitor disabled, when you press a file in the pane.
 - `code --goto <file>` when VS Code's command is installed in `/opt/homebrew/bin` or
@@ -101,7 +145,7 @@ and you press enter. Saying "cancel", "nothing" or "skip" submits nothing. The p
 coming from the plugin for Claude Code's hooks and transcript; the model reads it as your words.
 
 **What it reads.** The environment variables `HOME`, `USER`, `CLAUSPER_WHISPER_MODEL`,
-`CLAUSPER_RECORDER` and `CLAUSPER_WHISPER`, the reply text,
+`CLAUSPER_RECORDER`, `CLAUSPER_WHISPER` and `CLAUSPER_UV`, the reply text,
 the paths and commands of tool calls in your session, and files you choose to open from the pane.
 It reads no credentials, keys or tokens, and stores only its own settings (voice, listen mode,
 wake word, private mode) in the plugin store Claude Code provides.
@@ -118,7 +162,9 @@ Security: [SECURITY.md](SECURITY.md). Privacy: [PRIVACY.md](PRIVACY.md). Terms: 
 - `/clausper listen` listens once; `/clausper listen auto|fill|off` sets the mode; `/clausper setup` checks the tools
 - `/clausper wake on|off` requires "Clausper, …" before a spoken prompt is sent (on by default)
 - `/clausper private on|off` skips the model call entirely and speaks the reply's own opening sentences
-- `/clausper voice <name>` picks a system voice, `/clausper voices` lists them
+- `/clausper voice <name>` picks a system voice or a Kokoro voice (`af_heart`, `bm_george`, …),
+  `/clausper voice kokoro` the default Kokoro voice, `/clausper voice default` the system default,
+  `/clausper voice install` fetches Kokoro's packages once; `/clausper voices` lists them all
 - `/clausper test` speaks a test line
 
 In the pane, `m` mutes, `a` says the last summary again, `s` stops, `l` listens, `b` goes back.
@@ -133,4 +179,4 @@ The landing page is its own repository: https://github.com/kenawak/clausper-site
 ## Requirements
 
 macOS, for the system voice and microphone. On other platforms the pane and captions work and
-nothing is spoken.
+nothing is spoken. The Kokoro voice needs uv and about 450 MB for the model and its packages.
