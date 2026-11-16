@@ -86,6 +86,14 @@ well under a second, while the sentence before it plays. For a long reply the su
 made while the opening sentence is spoken. If Kokoro cannot speak, for any reason, the system voice
 says the rest and a toast says why.
 
+## Several sessions at once
+
+Each Claude Code session runs its own Clausper, and they take turns. When two sessions finish
+together, one speaks while the other waits and then begins with its project's folder name ("In
+weather app."), so you know whose summary you are hearing. In listen mode only the session whose
+turn it is listens, so one spoken answer is never sent to two sessions. Stop in a waiting
+session gives up its turn; its summary still shows in the pane.
+
 ## What Clausper does on your machine
 
 Clausper is a hooks module. This is everything it runs, reads, sends and submits.
@@ -129,6 +137,11 @@ where noted.
   same command with `--list` to check that Kokoro can load. Stop ends the playback and the runner.
 - `uv sync --script tts/kokoro.py --locked --no-config`, only when you run `/clausper voice
   install`, to download those pinned packages into uv's cache.
+- `mkdir -m 700 ~/.clausper/floor`, before speaking or listening, to take this session's turn:
+  only one session can create the folder. The holder writes a random id and the time into
+  `floor/owner` every two seconds and removes the folder (`rm -rf`) when its turn ends or the
+  session exits. A folder whose owner has been silent for ten seconds (a session that was killed)
+  is moved aside with `mv` and removed. `mkdir -p ~/.clausper` makes the parent folder first.
 - `git diff --no-ext-diff -- <file>` and `git status --porcelain -- <file>`, run in the file's
   folder with external diff tools and the file monitor disabled, when you press a file in the pane.
 - `code --goto <file>` when VS Code's command is installed in `/opt/homebrew/bin` or

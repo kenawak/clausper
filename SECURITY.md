@@ -21,8 +21,9 @@ uses, each pinned by version and hash.
 - **Programs.** Search for `process.run`. Every command is listed in the README under
   "What Clausper does on your machine": the speech synthesizer, `killall -u <you> say`,
   `say -v ?`, `mktemp`, `rec`, `whisper-cli`, `rm -rf` on the one private recording folder,
-  `uv` for the optional Kokoro voice, `git diff`, `git status`, and `open` on a file you pressed.
-  All run directly, without a shell.
+  `uv` for the optional Kokoro voice, `mkdir`, `mv` and `rm -rf` on `~/.clausper/floor` (the
+  turn-taking folder shared by your sessions), `git diff`, `git status`, and `open` on a file
+  you pressed. All run directly, without a shell.
 - **Where programs come from.** The recorder and transcriber are looked up in the package
   managers' own folders (`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`). PATH is never
   searched. The overrides `CLAUSPER_RECORDER`, `CLAUSPER_WHISPER` and `CLAUSPER_WHISPER_MODEL`
