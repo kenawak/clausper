@@ -1328,8 +1328,10 @@ export const register: Register = on => {
         }
       }
       case 'voice': {
-        const [first = '', second = ''] = arg.toLowerCase().split(/\s+/)
-        if (arg === '' || first === 'default' || first === 'system') {
+        // "kokoro," or "Samantha." as typed or dictated: trailing punctuation is never part of a name.
+        const voiceArg = arg.replace(/[\s.,;:!?]+$/, '')
+        const [first = '', second = ''] = voiceArg.toLowerCase().split(/\s+/)
+        if (voiceArg === '' || first === 'default' || first === 'system') {
           await $.store.delete('voice')
           await $.store.delete('kokoroVoice')
           return { text: 'Clausper will use the system default voice.' }
@@ -1360,9 +1362,9 @@ export const register: Register = on => {
           }
         }
         await $.store.delete('kokoroVoice')
-        await $.store.set('voice', arg)
-        later($, () => speak($, `Hi, this is ${arg}. I am Clausper.`))
-        return { text: `Clausper voice set to ${arg}.` }
+        await $.store.set('voice', voiceArg)
+        later($, () => speak($, `Hi, this is ${voiceArg}. I am Clausper.`))
+        return { text: `Clausper voice set to ${voiceArg}.` }
       }
       case 'voices': {
         const names = await systemVoices($)

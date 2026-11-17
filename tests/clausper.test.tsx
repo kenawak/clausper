@@ -396,6 +396,9 @@ test('kokoro: not set up, the system voice speaks and setup says what is missing
   expect(setup.text).toContain('uv (runs Kokoro): missing  → /clausper voice install fetches it')
   expect(setup.text).toContain('Kokoro model: missing  → /clausper voice install fetches it')
 
+  const comma = await command($, 'voice kokoro,')
+  expect(comma.text).toContain('Clausper voice set to Kokoro af_heart.')
+
   const unknown = await command($, 'voice kokoro zz_nobody')
   expect(unknown.text).toContain('No Kokoro voice zz_nobody')
   const back = await command($, 'voice default')
