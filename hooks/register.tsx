@@ -5,14 +5,19 @@ import { BEEP_START, BEEP_STOP } from './beeps'
 import {
   binDirs,
   codeDirs,
+  download,
   installHint,
   isLinux,
+  machineTarget,
   playCue,
   playFile,
+  runLong,
   sayWithSystem,
+  sha256Of,
   speechReport,
   stopSystemVoice,
   systemVoices,
+  untar,
 } from './platform'
 
 import type { Change, ListenMode, TurnRecord, View } from '../types'
@@ -374,14 +379,15 @@ const kokoroVoice = async ($: Engine) => {
   return typeof voice === 'string' && KOKORO_VOICES.includes(voice) ? voice : null
 }
 
-// uv from the package managers' folders or uv's own installer folder (~/.local/bin), never PATH;
-// the model files only from ~/.clausper/models.
+// uv from the package managers' folders, uv's own installer folder (~/.local/bin)
+// or the copy Clausper fetched (~/.clausper/bin), never PATH; the model files
+// only from ~/.clausper/models.
 const findKokoro = async ($: Engine): Promise<Kokoro> => {
   const home = await $.env.get('HOME')
   if (home === undefined || !home.startsWith('/')) return { uv: null, model: null, voices: null }
   const cwd = await $.session.cwd()
   const uvOverride = await $.env.get('CLAUSPER_UV')
-  const uv = await firstPresent($, ['uv'], [...(await binDirs($)), `${home}/.local/bin`], uvOverride, cwd)
+  const uv = await firstPresent($, ['uv'], [...(await binDirs($)), `${home}/.local/bin`, `${home}/.clausper/bin`], uvOverride, cwd)
   const dir = `${home}/.clausper/models`
   let model: string | null = null
   for (const name of KOKORO_MODELS) {
@@ -431,7 +437,8 @@ const liveSyntheses = new Set<Synthesis>()
 const startSynthesis = async ($: Engine, sentences: string[], voice: string): Promise<Synthesis | null> => {
   const kit = await findKokoro($)
   if (!isKokoroReady(kit)) {
-    noteFallback($, kit.uv === null ? 'uv is not installed' : 'the model files are not in ~/.clausper/models')
+    // Being fetched right now: the system voice speaks meanwhile, without a toast.
+    if (!isSettingUp) noteFallback($, kit.uv === null ? 'uv is not installed' : 'the model files are not in ~/.clausper/models')
     return null
   }
   // A private folder (mktemp -d creates it 0700) holds this utterance's clips.
@@ -730,47 +737,148 @@ const kokoroPackages = async ($: Engine, kit: Kokoro) => {
   return 'missing  → /clausper voice install (fetches the pinned packages once, about 130 MB)'
 }
 
-// uv's own installer on Linux, Homebrew's on macOS.
-const uvHint = async ($: Engine) => ((await isLinux($)) ? 'install uv (curl -LsSf https://astral.sh/uv/install.sh | sh)' : 'brew install uv')
+const FETCHES = 'missing  → /clausper voice install fetches it'
 
-const voiceReport = (kit: Kokoro, packages: string, chosen: string | null, uvInstall: string) =>
+const voiceReport = (kit: Kokoro, packages: string, chosen: string | null) =>
   [
     `voice: ${chosen === null ? 'system  (for a natural voice: /clausper voice kokoro)' : `Kokoro ${chosen}`}`,
-    `uv (runs Kokoro): ${kit.uv ?? `missing  → ${uvInstall} (or set CLAUSPER_UV)`}`,
-    `Kokoro model: ${kit.model ?? `missing  → save ${KOKORO_MODELS[0]} to ~/.clausper/models/ (see the README)`}`,
-    `Kokoro voices: ${kit.voices ?? `missing  → save ${KOKORO_VOICES_FILE} to ~/.clausper/models/ (see the README)`}`,
+    `uv (runs Kokoro): ${kit.uv ?? `${FETCHES} (or set CLAUSPER_UV)`}`,
+    `Kokoro model: ${kit.model ?? FETCHES}`,
+    `Kokoro voices: ${kit.voices ?? FETCHES}`,
     `Kokoro packages: ${packages}`,
   ].join('\n')
 
-// Fetches the runner's packages, exactly as pinned with hashes in tts/kokoro.py.lock,
-// into uv's cache. The only time Clausper's voice touches the network, and only on request.
-const installKokoro = async ($: Engine) => {
-  const kit = await findKokoro($)
-  if (kit.uv === null) {
-    $.ui.toast(`Clausper: ${await uvHint($)} first, then run /clausper voice install again`)
-    return
-  }
-  $.ui.status('Clausper: installing the Kokoro voice…')
+// ---------------------------------------------------------------- kokoro setup
+
+// Choosing Kokoro sets it up by itself: uv, when none is installed, as a pinned
+// release into ~/.clausper/bin; the two model files into ~/.clausper/models; then
+// the runner's packages, as pinned with hashes in tts/kokoro.py.lock. Each download
+// is written beside its place as .part, checked against the SHA-256 pinned here,
+// and moved into place only if it matches. The only time Clausper's voice touches
+// the network, and only when the person chose Kokoro or ran /clausper voice install.
+const UV_VERSION = '0.13.6'
+const UV_SHA256: Record<string, string> = {
+  'aarch64-apple-darwin': '60fbd5c8a1ed681845eea28d9d622fcde03c51e91a43465b64a1e17db1ed3472',
+  'x86_64-apple-darwin': '63ba17fdda55ad1a230d4b37fc6017ffa10c23688c83818bd3bfdf914c652a02',
+  'aarch64-unknown-linux-gnu': '229e194255c7958d86d56e8790d969a6f74736592133f0dfd0076f754c642c1d',
+  'x86_64-unknown-linux-gnu': 'f29c3e94ffabd7e6f3ba521dba169a9b7ec12100bf3257087f0f24f6123f3645',
+}
+const KOKORO_RELEASE = 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0'
+const KOKORO_DOWNLOADS = [
+  { name: 'kokoro-v1.0.onnx', label: 'the model', mb: 326, sha256: '7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5' },
+  { name: KOKORO_VOICES_FILE, label: 'the voices', mb: 28, sha256: 'bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d' },
+]
+// A .part file nobody has written to for this long was left by a run that ended.
+const STALE_PART_MS = 10 * 60 * 1000
+
+// Set while this session fetches Kokoro, so a second request waits for the first.
+let isSettingUp = false
+
+const settingUp = ($: Engine, what: string) => $.ui.status(`Clausper: getting the Kokoro voice ready: ${what}`)
+
+// Downloads one pinned file to `path`, by way of a .part file of its own, so two
+// sessions fetching at once never write the same file.
+const fetchPinned = async ($: Engine, url: string, path: string, pin: { label: string; mb: number; sha256: string }) => {
+  const part = `${path}.${crypto.randomUUID()}.part`
   try {
-    const synced = await $.process.run(
-      [kit.uv, 'sync', '--script', `${$.plugin.root}/tts/kokoro.py`, '--locked', '--no-config', '--quiet'],
-      { cwd: (await $.env.get('HOME')) ?? '/', env: { PYTHONPATH: '' }, timeoutMs: 600000 },
+    settingUp($, `${pin.label} (${pin.mb} MB)…`)
+    await download($, url, part, bytes =>
+      settingUp($, `${pin.label} ${Math.min(99, Math.round(bytes / (pin.mb * 1e4)))}% (${Math.round(bytes / 1e6)} of ${pin.mb} MB)`),
     )
-    if (synced.exitCode !== 0) {
-      const reason = synced.stderr.trim().split('\n').pop() ?? `exit ${synced.exitCode}`
-      $.ui.toast(`Clausper: the Kokoro install failed: ${clip(reason, 120)}`)
+    const sum = await sha256Of($, part)
+    if (sum !== pin.sha256) throw new Error(`${pin.label} did not match its pinned checksum, so it was deleted`)
+    const moved = await $.process.run(['mv', '-f', part, path], { timeoutMs: 60000 })
+    if (moved.exitCode !== 0) throw new Error(`could not move ${pin.label} into place`)
+  } finally {
+    await $.process.run(['rm', '-f', part], { timeoutMs: 10000 }).catch(() => undefined)
+  }
+}
+
+const fetchUv = async ($: Engine, home: string) => {
+  const target = await machineTarget($)
+  const sha256 = target === null ? undefined : UV_SHA256[target]
+  if (target === null || sha256 === undefined) throw new Error('there is no pinned uv for this machine: install uv yourself')
+  const made = await $.process.run(['mktemp', '-d', '-t', 'clausper.XXXXXXXX'], { timeoutMs: 5000 })
+  const dir = made.stdout.trim()
+  if (dir === '') throw new Error('no private folder for the download')
+  try {
+    const archive = `${dir}/uv.tar.gz`
+    await fetchPinned($, `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${target}.tar.gz`, archive, {
+      label: 'uv',
+      mb: 17,
+      sha256,
+    })
+    await untar($, archive, dir)
+    const bin = `${home}/.clausper/bin`
+    await $.process.run(['mkdir', '-p', bin], { timeoutMs: 5000 })
+    const moved = await $.process.run(['mv', '-f', `${dir}/uv-${target}/uv`, `${bin}/uv`], { timeoutMs: 10000 })
+    if (moved.exitCode !== 0) throw new Error('could not move uv into place')
+  } finally {
+    await $.process.run(['rm', '-rf', dir], { timeoutMs: 10000 }).catch(() => undefined)
+  }
+}
+
+// Removes what an interrupted download left behind.
+const clearStaleParts = async ($: Engine, dir: string) => {
+  try {
+    const now = await $.clock.now()
+    for (const entry of await $.fs.list(dir)) {
+      if (entry.name.endsWith('.part') && now - entry.mtimeMs > STALE_PART_MS) {
+        await $.process.run(['rm', '-f', `${dir}/${entry.name}`], { timeoutMs: 10000 })
+      }
+    }
+  } catch {
+    // nothing to clear
+  }
+}
+
+// Fetches whatever Kokoro still needs. Resolves whether Kokoro can speak now.
+const setupKokoro = async ($: Engine): Promise<boolean> => {
+  if (isSettingUp) {
+    $.ui.toast('Clausper: the Kokoro voice is already being set up; see the status line')
+    return false
+  }
+  const home = await $.env.get('HOME')
+  if (home === undefined || !home.startsWith('/')) {
+    $.ui.toast('Clausper: no home folder to keep the Kokoro voice in')
+    return false
+  }
+  isSettingUp = true
+  try {
+    const found = await findKokoro($)
+    if (isKokoroReady(found) && (await kokoroPackages($, found)) === 'installed') return true
+    settingUp($, 'starting…')
+    if (found.uv === null) await fetchUv($, home)
+    const models = `${home}/.clausper/models`
+    await $.process.run(['mkdir', '-p', models], { timeoutMs: 5000 })
+    await clearStaleParts($, models)
+    for (const file of KOKORO_DOWNLOADS) {
+      const isThere = file.name === KOKORO_VOICES_FILE ? found.voices !== null : found.model !== null
+      if (!isThere) await fetchPinned($, `${KOKORO_RELEASE}/${file.name}`, `${models}/${file.name}`, file)
+    }
+    const kit = await findKokoro($)
+    if (!isKokoroReady(kit)) throw new Error('the files are still missing after the download')
+    settingUp($, 'Python packages (about 130 MB)…')
+    // No time limit: on a slow connection the packages only take longer.
+    const synced = await runLong(
+      $,
+      [kit.uv, 'sync', '--script', `${$.plugin.root}/tts/kokoro.py`, '--locked', '--no-config', '--quiet'],
+      home,
+      { PYTHONPATH: '' },
+    )
+    if (synced.code !== 0) {
       $.ui.log(`clausper: uv sync failed: ${synced.stderr.slice(-800)}`, { to: 'debug' })
-      return
+      throw new Error(synced.stderr.trim().split('\n').pop() || `uv exited with ${synced.code ?? 'a signal'}`)
     }
     lastFallback = ''
-    const ready = isKokoroReady(kit)
-    $.ui.toast(
-      ready
-        ? 'Clausper: the Kokoro voice is installed.'
-        : 'Clausper: the Kokoro packages are installed; the model files are still missing (see /clausper setup).',
-    )
-    if (ready && (await kokoroVoice($)) !== null) await speak($, 'The Kokoro voice is ready. This is how I will sound from now on.')
+    return true
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    $.ui.log(`clausper: kokoro setup failed: ${reason}`, { to: 'debug' })
+    $.ui.toast(`Clausper: could not set up the Kokoro voice (${clip(reason, 120)}). The system voice keeps speaking; /clausper voice install tries again.`)
+    return false
   } finally {
+    isSettingUp = false
     $.ui.status(undefined)
   }
 }
@@ -1126,6 +1234,11 @@ export const register: Register = on => {
     const storedPrivate = await $.store.get('private')
     if (typeof storedPrivate === 'boolean') await update($, isPrivate, () => storedPrivate)
     void $.ui.open({ id: PANE, title: 'Clausper' })
+    // Once ever: a natural voice is one command away.
+    if ((await $.store.get('kokoroHinted')) !== true && (await kokoroVoice($)) === null) {
+      await $.store.set('kokoroHinted', true)
+      $.ui.toast('Clausper tip: /clausper voice kokoro switches to a natural voice. It sets itself up, once (about 500 MB).')
+    }
 
     return next(e)
   })
@@ -1205,12 +1318,12 @@ export const register: Register = on => {
             ready
               ? 'Ready to listen. Try /clausper listen, or turn it on after every reply with /clausper listen auto.'
               : 'Install what is missing, then run /clausper setup again.'
-          }\n\nVoice\n${[await speechReport($), voiceReport(kit, packages, chosen, await uvHint($))].filter(part => part !== '').join('\n')}\n${
+          }\n\nVoice\n${[await speechReport($), voiceReport(kit, packages, chosen)].filter(part => part !== '').join('\n')}\n${
             speaks
               ? chosen === null
                 ? 'Kokoro is ready. Turn it on with /clausper voice kokoro.'
                 : 'Kokoro is ready and speaking.'
-              : 'The system voice speaks until Kokoro is set up (optional).'
+              : 'The system voice speaks until Kokoro is set up. /clausper voice kokoro sets it up by itself (optional).'
           }`,
         }
       }
@@ -1222,8 +1335,10 @@ export const register: Register = on => {
           return { text: 'Clausper will use the system default voice.' }
         }
         if (first === 'install') {
-          later($, () => installKokoro($))
-          return { text: 'Installing the Kokoro voice packages with uv, once. Clausper will say when it is done.' }
+          later($, async () => {
+            if (await setupKokoro($)) await speak($, 'The Kokoro voice is ready.')
+          })
+          return { text: 'Setting up the Kokoro voice: Clausper fetches what is missing, checks each file, and says when it is ready.' }
         }
         if (first === 'kokoro' || KOKORO_VOICES.includes(first)) {
           const chosen = first === 'kokoro' ? second || KOKORO_DEFAULT : first
@@ -1232,12 +1347,16 @@ export const register: Register = on => {
           }
           await $.store.set('kokoroVoice', chosen)
           const name = chosen.slice(3, 4).toUpperCase() + chosen.slice(4)
-          later($, () => speak($, `Hi, this is ${name}. I am Clausper.`))
           const kit = await findKokoro($)
+          // Sets up whatever is missing first (nothing to do once it is there), then says hello.
+          later($, async () => {
+            await setupKokoro($)
+            await speak($, `Hi, this is ${name}. I am Clausper.`)
+          })
           return {
             text: isKokoroReady(kit)
               ? `Clausper voice set to Kokoro ${chosen}.`
-              : `Clausper voice set to Kokoro ${chosen}. Kokoro is not set up yet, so the system voice speaks for now: see /clausper setup.`,
+              : `Clausper voice set to Kokoro ${chosen}. Setting it up now, once: up to about 500 MB of downloads, each checked, with progress in the status line. The system voice speaks until it is ready.`,
           }
         }
         await $.store.delete('kokoroVoice')

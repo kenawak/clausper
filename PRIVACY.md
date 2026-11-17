@@ -19,7 +19,7 @@ Clausper runs on your computer. Your voice, your recordings and the files it sho
 - No telemetry, crash reporting, or usage analytics.
 - No accounts, cookies, or identifiers.
 - No reading of credentials, keys or tokens. It reads six environment variables: `HOME` and `USER`, and the optional `CLAUSPER_WHISPER_MODEL`, `CLAUSPER_RECORDER`, `CLAUSPER_WHISPER` and `CLAUSPER_UV` overrides.
-- No network calls of its own. The only outbound request is the summary call made through Claude Code, and, only when you run `/clausper voice install`, uv's download of the Kokoro voice's pinned packages from PyPI (PyPI sees your IP address, under its own privacy policy).
+- No network calls of its own. The only outbound request is the summary call made through Claude Code, and, only when you choose the Kokoro voice or run `/clausper voice install`, its one-time setup: uv and the model files downloaded from GitHub, and the pinned packages from PyPI (GitHub and PyPI see your IP address, under their own privacy policies).
 
 ## The website
 

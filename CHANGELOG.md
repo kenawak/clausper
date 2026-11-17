@@ -2,6 +2,15 @@
 
 All notable changes to Clausper. Dates are when the change shipped to the mod.
 
+## 0.4.1 — 2026-11-17
+
+### Changed
+- The Kokoro voice sets itself up. `/clausper voice kokoro` fetches whatever is missing, once: uv 0.13.6 into `~/.clausper/bin` (when no uv is installed), the model files into `~/.clausper/models`, and the pinned packages. Progress shows in the status line, and the system voice keeps speaking until Kokoro is ready. No more `brew install uv` or manual model downloads.
+- A one-time tip at the first session points to `/clausper voice kokoro`.
+
+### Security
+- Every download is https only and checked against a SHA-256 pinned in the source before it is moved into place; a file that does not match is deleted. The setup runs only when you choose Kokoro or run `/clausper voice install`.
+
 ## 0.4.0 — 2026-11-16
 
 ### Added

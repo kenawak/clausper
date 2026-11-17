@@ -70,8 +70,7 @@ Claude Code speaks and plays sound only on macOS, so on Linux Clausper runs its 
 - The system voice is `espeak-ng` (or `espeak`, or speech-dispatcher's `spd-say`).
   `/clausper voices` lists its languages; `/clausper voice en-gb` picks one.
 - Kokoro clips play through `pw-play`, `paplay`, `aplay` or sox's `play`, whichever is installed
-  first. Kokoro is the better voice on Linux too, and installs the same way (uv from
-  https://docs.astral.sh/uv/ instead of Homebrew).
+  first. Kokoro is the better voice on Linux too, and sets itself up the same way.
 - The listening cues are made by sox's `play`, installed with sox.
 - "Open in editor" uses VS Code's `code` when it is installed; otherwise copy the path.
   `xdg-open` is never used, because it can run a `.desktop` file instead of showing it.
@@ -82,22 +81,27 @@ The system voices can sound robotic. Kokoro is an open-weight neural text-to-spe
 (82 million parameters, Apache 2.0) that sounds close to a person and runs on your computer's CPU, the
 same way listen mode runs whisper.cpp: nothing you hear is made anywhere else.
 
-    brew install uv
+One command turns it on and sets it up:
 
-Then download two files from the kokoro-onnx model release,
-https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0, and save them in
-`~/.clausper/models/`:
+    /clausper voice kokoro
 
-- `kokoro-v1.0.onnx` (326 MB), or the smaller `kokoro-v1.0.int8.onnx` (92 MB, a little rougher)
-- `voices-v1.0.bin` (28 MB)
+The first time, Clausper fetches what is missing, once, with progress in the status line, while
+the system voice keeps speaking. It then says hello in the new voice:
 
-Nothing is executed from these downloads: they are data files the model runtime reads.
+- uv 0.13.6 (17 MB) into `~/.clausper/bin`, from uv's GitHub release, when no uv is installed
+  (Homebrew's, or uv's own installer's in `~/.local/bin`, is used when it is there)
+- `kokoro-v1.0.onnx` (326 MB) and `voices-v1.0.bin` (28 MB) into `~/.clausper/models`, from the
+  kokoro-onnx model release
+- the runner's Python packages (about 130 MB), exactly the versions and hashes pinned in
+  `tts/kokoro.py.lock`, from PyPI into uv's cache, and Python itself if no 3.10–3.13 is installed
 
-Then run `/clausper voice install` once. uv downloads the runner's Python packages from PyPI,
-exactly the versions and hashes pinned in `tts/kokoro.py.lock` (kokoro-onnx, onnxruntime, numpy
-and their dependencies, about 130 MB on disk). `/clausper setup` checks every piece.
+Every file is downloaded over https under a temporary `.part` name, checked against the SHA-256
+pinned in `hooks/register.tsx`, and moved into place only if it matches. A file that does not
+match is deleted. Nothing is executed from the model files: they are data the model runtime
+reads. If the setup is interrupted, `/clausper voice install` picks up where it stopped.
+`/clausper setup` checks every piece.
 
-`/clausper voice kokoro` turns it on with the default voice, `af_heart`. `/clausper voice bm_george`
+`/clausper voice kokoro` uses the default voice, `af_heart`. `/clausper voice bm_george`
 picks another: `af_` and `am_` are American female and male voices, `bf_` and `bm_` British;
 `/clausper voices` lists them all. `/clausper voice default` goes back to the system voice.
 
@@ -128,8 +132,9 @@ the prompt. It never touches permission modes, settings, other plugins or the mo
 **What it sends, and where.** One model call per long reply (none in private mode), through your own Claude Code session
 to the same Anthropic API your session already uses, carrying the text of that reply and a fixed
 instruction to summarize it (the `haiku` model). Short replies are not sent anywhere. The one
-other network use is `/clausper voice install`, which you run once for the Kokoro voice: uv
-downloads the pinned packages from PyPI. Speaking never touches the network. No telemetry, no
+other network use is the Kokoro setup, which runs only when you choose Kokoro (`/clausper voice
+kokoro`) or run `/clausper voice install`: the pinned files from GitHub releases, and the pinned
+packages (and Python, if needed) through uv. Speaking never touches the network. No telemetry, no
 third-party service, and your voice recordings never leave the machine.
 
 **Programs it runs, and why.** All are run directly, without a shell, with fixed arguments except
@@ -164,8 +169,12 @@ where noted.
   `~/.local/bin` (where uv's own installer puts it), or at `CLAUSPER_UV` under the same rules as
   the other overrides; the model files only in `~/.clausper/models`. `/clausper setup` runs the
   same command with `--list` to check that Kokoro can load. Stop ends the playback and the runner.
-- `uv sync --script tts/kokoro.py --locked --no-config`, only when you run `/clausper voice
-  install`, to download those pinned packages into uv's cache.
+- For the Kokoro setup, only when you choose Kokoro or run `/clausper voice install`:
+  `uname -m`, to pick uv's build; `curl -fsSL --proto =https` from `/usr/bin` to download each
+  pinned file; `shasum -a 256` (Linux: `sha256sum`) to check it; `tar -xzf` to unpack uv;
+  `mkdir -p`, `mv` and `rm` to put files in place in `~/.clausper` and remove `.part` files;
+  `uv sync --script tts/kokoro.py --locked --no-config` to download the pinned packages into
+  uv's cache.
 - `mkdir -m 700 ~/.clausper/floor`, before speaking or listening, to take this session's turn:
   only one session can create the folder. The holder writes a random id and the time into
   `floor/owner` every two seconds and removes the folder (`rm -rf`) when its turn ends or the
@@ -207,7 +216,7 @@ Security: [SECURITY.md](SECURITY.md). Privacy: [PRIVACY.md](PRIVACY.md). Terms: 
 - `/clausper private on|off` skips the model call entirely and speaks the reply's own opening sentences
 - `/clausper voice <name>` picks a system voice or a Kokoro voice (`af_heart`, `bm_george`, …),
   `/clausper voice kokoro` the default Kokoro voice, `/clausper voice default` the system default,
-  `/clausper voice install` fetches Kokoro's packages once; `/clausper voices` lists them all
+  `/clausper voice install` sets Kokoro up again if anything is missing; `/clausper voices` lists them all
 - `/clausper test` speaks a test line
 
 In the pane, `m` mutes, `a` says the last summary again, `s` stops, `l` listens, `b` goes back.

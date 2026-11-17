@@ -62,12 +62,13 @@ export async function installHint($: Engine, brew: string, apt: string) {
 // The programs Clausper started to speak or play on Linux; stop ends them all.
 const children = new Set<() => void>()
 
-// Runs a program to its end, its whole life inside this call; stop, or an
-// abort of `signal`, ends it early. Resolves the exit code, or null when killed.
+// Runs a program to its end, its whole life inside this call; stop (unless
+// `isStoppable` is false), or an abort of `signal`, ends it early. Resolves the
+// exit code, or null when killed.
 async function runToEnd(
   $: Engine,
   argv: string[],
-  options: { input?: string; signal?: AbortSignal } = {},
+  options: { input?: string; signal?: AbortSignal; isStoppable?: boolean } = {},
 ): Promise<number | null> {
   const stream = $.process.spawn(options.input === undefined ? { argv } : { argv, input: options.input })
   let isKilled = false
@@ -75,7 +76,7 @@ async function runToEnd(
     isKilled = true
     stream.return({ code: null, signal: null }).catch(() => undefined)
   }
-  children.add(kill)
+  if (options.isStoppable !== false) children.add(kill)
   options.signal?.addEventListener('abort', kill, { once: true })
   try {
     for await (const piece of stream) {
@@ -207,4 +208,79 @@ export async function speechReport($: Engine) {
     `system voice: ${synth ?? 'missing  → sudo apt install espeak-ng'}`,
     `audio player (Kokoro clips): ${player ?? 'missing  → pw-play, paplay, aplay or sox play'}`,
   ].join('\n')
+}
+
+// ---------------------------------------------------------------- downloads
+
+// This machine as uv names its builds (`aarch64-apple-darwin`, ...); null on
+// anything else.
+export async function machineTarget($: Engine): Promise<string | null> {
+  const system = await platform($)
+  if (system === 'other') return null
+  let arch = ''
+  try {
+    const named = await $.process.run(['uname', '-m'], { timeoutMs: 3000 })
+    arch = named.stdout.trim()
+  } catch {
+    return null
+  }
+  const cpu = arch === 'arm64' || arch === 'aarch64' ? 'aarch64' : arch === 'x86_64' ? 'x86_64' : null
+  if (cpu === null) return null
+  return system === 'macos' ? `${cpu}-apple-darwin` : `${cpu}-unknown-linux-gnu`
+}
+
+// Downloads `url`, https only, to `path`, telling `onBytes` how much has
+// arrived every second. No time limit: a slow connection only takes longer, and
+// stop does not end it.
+export async function download($: Engine, url: string, path: string, onBytes: (bytes: number) => void) {
+  const curl = await firstIn($, ['curl'], ['/usr/bin', '/bin'])
+  if (curl === null) throw new Error('curl is not installed')
+  let isDone = false
+  let timer: { cancel: () => void } | null = null
+  const poll = async () => {
+    try {
+      const stat = await $.fs.stat(path)
+      if (!isDone) onBytes(stat.size)
+    } catch {
+      // not started writing yet
+    }
+    if (!isDone) timer = $.clock.after(1000, () => void poll())
+  }
+  timer = $.clock.after(1000, () => void poll())
+  try {
+    const code = await runToEnd($, [curl, '-fsSL', '--proto', '=https', '--retry', '3', '-o', path, url], { isStoppable: false })
+    if (code !== 0) throw new Error(`the download failed (curl exited with ${code ?? 'a signal'}): check the connection`)
+  } finally {
+    isDone = true
+    timer?.cancel()
+  }
+}
+
+// The file's SHA-256 as lowercase hex: shasum on macOS, sha256sum on Linux.
+export async function sha256Of($: Engine, path: string) {
+  const linux = await isLinux($)
+  const tool = linux ? await firstIn($, ['sha256sum'], ['/usr/bin', '/bin']) : '/usr/bin/shasum'
+  if (tool === null) throw new Error('sha256sum is not installed')
+  const summed = await $.process.run(linux ? [tool, '--', path] : [tool, '-a', '256', path], { timeoutMs: 120000 })
+  return summed.stdout.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
+}
+
+// Runs a long setup step (uv fetching packages) with no time limit, keeping the
+// end of its error output for the message when it fails.
+export async function runLong($: Engine, argv: string[], cwd: string, env: Record<string, string>) {
+  const stream = $.process.spawn({ argv, cwd, env })
+  let stderr = ''
+  for await (const piece of stream) {
+    if (piece.stream === 'stderr') stderr = (stderr + piece.text).slice(-2000)
+  }
+  const ended = await stream.result
+  return { code: ended.code, stderr }
+}
+
+// Unpacks a .tar.gz into `dir`.
+export async function untar($: Engine, archive: string, dir: string) {
+  const tar = await firstIn($, ['tar'], ['/usr/bin', '/bin'])
+  if (tar === null) throw new Error('tar is not installed')
+  const unpacked = await $.process.run([tar, '-xzf', archive, '-C', dir], { timeoutMs: 60000 })
+  if (unpacked.exitCode !== 0) throw new Error(`tar exited with ${unpacked.exitCode}`)
 }

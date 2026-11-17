@@ -15,8 +15,10 @@ uses, each pinned by version and hash.
 - **Network.** Search the source for `http`, `fetch`, `url` and `socket`. The only network
   activity is one `$.model.complete` call per long reply, which goes through your own Claude
   Code session to the Anthropic API it already uses. `/clausper private on` turns even that
-  off. The one exception is `/clausper voice install`, which you run once to fetch Kokoro's
-  pinned packages from PyPI with uv. Speaking runs uv with `--offline`. There is no telemetry
+  off. The one exception is the Kokoro setup, run only when you choose Kokoro or run
+  `/clausper voice install`: uv 0.13.6 and the two model files from GitHub releases with
+  `curl --proto =https`, each checked against a SHA-256 pinned in the source before it is moved
+  into place (a mismatch is deleted), then the hash-pinned packages from PyPI with uv. Speaking runs uv with `--offline`. There is no telemetry
   and no other endpoint.
 - **Programs.** Search for `process.run`. Every command is listed in the README under
   "What Clausper does on your machine": `uname -s`, the speech synthesizer, `killall -u <you> say`,

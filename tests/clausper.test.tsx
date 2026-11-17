@@ -286,21 +286,30 @@ const CLIPS = '/tmp/clausper.k1'
 
 // A Mac with uv and the Kokoro model files: the runner writes one clip per input
 // line and prints its path, or fails after `failAfter` clips.
-const kokoro = (on: On, options: { isInstalled?: boolean; failAfter?: number } = {}) => {
+const kokoro = (on: On, options: { isInstalled?: boolean; hasPackages?: boolean; failAfter?: number } = {}) => {
   const runs: { argv: readonly string[]; input: string }[] = []
   const commands: (readonly string[])[] = []
   const played: string[] = []
   const isInstalled = options.isInstalled ?? true
+  let hasPackages = options.hasPackages ?? true
   on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/ken' : e.name === 'USER' ? 'ken' : undefined }))
   on('fs.exists', () => ({ value: isInstalled }))
   on('process.run', (_, e) => {
     commands.push(e.argv)
     const [cmd = ''] = e.argv
     if (cmd === 'mktemp') return { value: { ...OK_RUN, stdout: `${CLIPS}\n` } }
-    if (e.argv.includes('--list')) return { value: { ...OK_RUN, stdout: 'af_heart\naf_bella\n' } }
+    if (e.argv[1] === 'sync') hasPackages = true
+    if (e.argv.includes('--list')) {
+      return { value: hasPackages ? { ...OK_RUN, stdout: 'af_heart\naf_bella\n' } : { ...OK_RUN, exitCode: 1 } }
+    }
     return { value: OK_RUN }
   })
   on('process.spawn', async function* (_, e) {
+    if (e.argv[1] === 'sync') {
+      commands.push(e.argv)
+      hasPackages = true
+      return { value: { code: 0, signal: null } }
+    }
     runs.push({ argv: e.argv, input: e.input ?? '' })
     const lines = (e.input ?? '').split('\n').filter(line => line !== '')
     for (const [index] of lines.entries()) {
@@ -377,15 +386,15 @@ test('kokoro: not set up, the system voice speaks and setup says what is missing
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
   const set = await command($, 'voice kokoro bm_george')
-  expect(set.text).toContain('Kokoro is not set up yet')
+  expect(set.text).toContain('Setting it up now')
   await clock.advance(1)
   expect(spoken).toEqual(['Hi, this is George.', 'I am Clausper.'])
   expect(k.runs).toEqual([])
 
   const setup = await command($, 'setup')
   expect(setup.text).toContain('voice: Kokoro bm_george')
-  expect(setup.text).toContain('brew install uv')
-  expect(setup.text).toContain('save kokoro-v1.0.onnx to ~/.clausper/models/')
+  expect(setup.text).toContain('uv (runs Kokoro): missing  → /clausper voice install fetches it')
+  expect(setup.text).toContain('Kokoro model: missing  → /clausper voice install fetches it')
 
   const unknown = await command($, 'voice kokoro zz_nobody')
   expect(unknown.text).toContain('No Kokoro voice zz_nobody')
@@ -395,8 +404,8 @@ test('kokoro: not set up, the system voice speaks and setup says what is missing
 
 test('kokoro: install fetches only the hash-locked packages, and setup then reports ready', async ($, on) => {
   const spoken: string[] = []
-  const { clock, toasts } = engine(on, spoken)
-  const k = kokoro(on)
+  const { clock } = engine(on, spoken)
+  const k = kokoro(on, { hasPackages: false })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
   await command($, 'voice install')
@@ -406,7 +415,7 @@ test('kokoro: install fetches only the hash-locked packages, and setup then repo
   expect(sync).toContain('--locked')
   expect(sync).toContain('--no-config')
   expect(sync?.[3]?.endsWith('/tts/kokoro.py')).toBe(true)
-  expect(toasts).toContain('Clausper: the Kokoro voice is installed.')
+  expect(spoken).toContain('The Kokoro voice is ready.')
 
   const setup = await command($, 'setup')
   expect(setup.text).toContain('Kokoro packages: installed')
@@ -610,9 +619,126 @@ test('linux: setup and voices speak Linux', async ($, on) => {
   expect(setup.text).toContain('build whisper.cpp')
   expect(setup.text).toContain('system voice: /usr/bin/espeak-ng')
   expect(setup.text).toContain('audio player (Kokoro clips): missing')
-  expect(setup.text).toContain('astral.sh/uv/install.sh')
+  expect(setup.text).toContain('/clausper voice install fetches it')
   expect(setup.text).not.toContain('brew')
 
   const voices = await command($, 'voices')
   expect(voices.text).toContain('System voices (2): en-gb, en-us')
+})
+
+// ---------------------------------------------------------------- kokoro setup
+
+const UV_PIN = '60fbd5c8a1ed681845eea28d9d622fcde03c51e91a43465b64a1e17db1ed3472'
+const MODEL_PIN = '7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5'
+const VOICES_PIN = 'bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d'
+const HOME_MODELS = '/home/ken/.clausper/models'
+
+// A fresh Apple Silicon Mac with nothing of Kokoro's: what the downloads write
+// appears once it is moved into place. `badSum` names a file whose checksum is wrong.
+const freshMac = (on: On, options: { badSum?: string } = {}) => {
+  const present = new Set<string>()
+  const commands: (readonly string[])[] = []
+  const downloads: (readonly string[])[] = []
+  const played: string[] = []
+  let hasPackages = false
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/ken' : e.name === 'USER' ? 'ken' : undefined }))
+  on('fs.exists', (_, e) => ({ value: present.has(e.path) || e.path === '/usr/bin/curl' || e.path === '/usr/bin/tar' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.stat', () => ({ value: { kind: 'file', size: 1000, mtimeMs: 0, isLink: false } }))
+  on('process.run', (_, e) => {
+    commands.push(e.argv)
+    const [cmd = '', first = '', second = '', third = ''] = e.argv
+    if (cmd === 'uname') return { value: { ...OK_RUN, stdout: first === '-m' ? 'arm64\n' : 'Darwin\n' } }
+    if (cmd === 'mktemp') return { value: { ...OK_RUN, stdout: `${CLIPS}\n` } }
+    if (cmd === '/usr/bin/shasum') {
+      const path = third
+      const pin = path.includes('uv.tar.gz') ? UV_PIN : path.includes('kokoro-v1.0.onnx') ? MODEL_PIN : VOICES_PIN
+      const sum = options.badSum !== undefined && path.includes(options.badSum) ? '0'.repeat(64) : pin
+      return { value: { ...OK_RUN, stdout: `${sum}  ${path}\n` } }
+    }
+    if (cmd === 'mv') present.add(second === '' ? first : e.argv.at(-1) ?? '')
+    if (e.argv[1] === 'sync') hasPackages = true
+    if (e.argv.includes('--list')) {
+      return { value: hasPackages ? { ...OK_RUN, stdout: 'af_heart\n' } : { ...OK_RUN, exitCode: 1 } }
+    }
+    return { value: OK_RUN }
+  })
+  on('process.spawn', async function* (_, e) {
+    if (e.argv[0] === '/usr/bin/curl') {
+      downloads.push(e.argv)
+      return { value: { code: 0, signal: null } }
+    }
+    if (e.argv[1] === 'sync') {
+      commands.push(e.argv)
+      hasPackages = true
+      return { value: { code: 0, signal: null } }
+    }
+    const lines = (e.input ?? '').split('\n').filter(line => line !== '')
+    for (const [index] of lines.entries()) {
+      yield { stream: 'stdout' as const, text: `${CLIPS}/${String(index + 1).padStart(3, '0')}.wav\n` }
+    }
+    return { value: { code: 0, signal: null } }
+  })
+  on('fs.read', (_, e) => ({ value: { base64: btoa(e.path) } }))
+  on('audio.play', (_, e) => {
+    if (e.clip.base64 !== undefined) played.push(atob(e.clip.base64))
+    return { value: undefined }
+  })
+  return { present, commands, downloads, played }
+}
+
+test('kokoro setup: choosing Kokoro on a fresh Mac fetches uv, the model and the packages, each checked', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  const m = freshMac(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const set = await command($, 'voice kokoro')
+  expect(set.text).toContain('Setting it up now')
+  await clock.advance(1)
+
+  // https only, from the pinned releases, in order.
+  expect(m.downloads.map(argv => argv.at(-1))).toEqual([
+    'https://github.com/astral-sh/uv/releases/download/0.13.6/uv-aarch64-apple-darwin.tar.gz',
+    'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx',
+    'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin',
+  ])
+  expect(m.downloads[0]?.slice(1, 4)).toEqual(['-fsSL', '--proto', '=https'])
+  // Each checked before it is moved into place.
+  expect(m.commands.filter(argv => argv[0] === '/usr/bin/shasum')).toHaveLength(3)
+  expect(m.present.has('/home/ken/.clausper/bin/uv')).toBe(true)
+  expect(m.present.has(`${HOME_MODELS}/kokoro-v1.0.onnx`)).toBe(true)
+  // The packages come from the fetched uv, hash-locked; then Kokoro says hello.
+  const sync = m.commands.find(argv => argv[1] === 'sync')
+  expect(sync?.[0]).toBe('/home/ken/.clausper/bin/uv')
+  expect(sync).toContain('--locked')
+  expect(spoken).toEqual([])
+  expect(m.played).toEqual([`${CLIPS}/001.wav`, `${CLIPS}/002.wav`])
+})
+
+test('kokoro setup: a download that does not match its pin is deleted and never used', async ($, on) => {
+  const spoken: string[] = []
+  const { clock, toasts } = engine(on, spoken)
+  const m = freshMac(on, { badSum: 'kokoro-v1.0.onnx' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await command($, 'voice kokoro')
+  await clock.advance(1)
+
+  expect(toasts.join('\n')).toContain('the model did not match its pinned checksum')
+  expect(m.present.has(`${HOME_MODELS}/kokoro-v1.0.onnx`)).toBe(false)
+  const removed = m.commands.filter(argv => argv[0] === 'rm' && argv[1] === '-f').map(argv => argv[2] ?? '')
+  expect(removed.some(path => path.startsWith(`${HOME_MODELS}/kokoro-v1.0.onnx.`) && path.endsWith('.part'))).toBe(true)
+  expect(m.commands.some(argv => argv[1] === 'sync')).toBe(false)
+  // The system voice says hello instead.
+  expect(spoken).toEqual(['Hi, this is Heart.', 'I am Clausper.'])
+})
+
+test('kokoro setup: the tip is shown once, never again', async ($, on) => {
+  const spoken: string[] = []
+  const { toasts } = engine(on, spoken)
+  freshMac(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(toasts.filter(text => text.includes('Clausper tip'))).toHaveLength(1)
 })
