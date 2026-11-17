@@ -2,7 +2,7 @@
 
 All notable changes to Clausper. Dates are when the change shipped to the mod.
 
-## Unreleased
+## 0.4.0 — 2026-11-16
 
 ### Added
 - A natural voice, optional: Kokoro, an open-weight neural text-to-speech model that runs on the Mac, chosen with `/clausper voice kokoro` or a voice name such as `/clausper voice af_heart`. `/clausper voice install` fetches its packages once; `/clausper setup` checks uv, the model files and the packages; `/clausper voices` lists the Kokoro voices beside the system ones.

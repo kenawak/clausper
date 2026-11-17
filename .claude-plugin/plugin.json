@@ -1,6 +1,6 @@
 {
   "name": "clausper",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Speaks a short summary of every Claude Code reply, captions it live, lists the files that changed, and lets you answer by voice. Runs on your subscription; your voice stays on your machine (macOS and Linux).",
   "types": "./types/index.d.ts",
   "license": "MIT",
