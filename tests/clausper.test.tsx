@@ -509,3 +509,110 @@ test('the floor: stop while waiting gives up the turn, and the summary still rea
   expect(await ui.find({ type: 'Button', text: /Added the Clausper pane/ })).toBeDefined()
   await ui.unmount()
 })
+
+// ---------------------------------------------------------------- linux
+
+// A Linux machine: Claude Code has no player there, so Clausper runs its own.
+// `present` are the files that exist; spawned programs are recorded with their input.
+const linux = (on: On, present: string[]) => {
+  const spawned: { argv: readonly string[]; input: string }[] = []
+  const commands: (readonly string[])[] = []
+  const engineAudio: string[] = []
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/ken' : e.name === 'USER' ? 'ken' : undefined }))
+  on('fs.exists', (_, e) => ({ value: present.includes(e.path) }))
+  on('process.run', (_, e) => {
+    commands.push(e.argv)
+    const [cmd = ''] = e.argv
+    if (cmd === 'uname') return { value: { ...OK_RUN, stdout: 'Linux\n' } }
+    if (cmd === 'mktemp') return { value: { ...OK_RUN, stdout: `${CLIPS}\n` } }
+    if (e.argv.includes('--voices') && cmd.endsWith('espeak-ng')) {
+      return { value: { ...OK_RUN, stdout: 'Pty Language       Age/Gender VoiceName\n 5  en-gb          --/M      English\n 2  en-us          --/M      English_(America)\n' } }
+    }
+    return { value: OK_RUN }
+  })
+  on('process.spawn', async function* (_, e) {
+    spawned.push({ argv: e.argv, input: e.input ?? '' })
+    if (e.argv.includes('--script')) {
+      const lines = (e.input ?? '').split('\n').filter(line => line !== '')
+      for (const [index] of lines.entries()) {
+        yield { stream: 'stdout' as const, text: `${CLIPS}/${String(index + 1).padStart(3, '0')}.wav\n` }
+      }
+    }
+    return { value: { code: 0, signal: null } }
+  })
+  on('audio.play', () => {
+    engineAudio.push('play')
+    return { value: undefined }
+  })
+  return { spawned, commands, engineAudio }
+}
+
+test('linux: the system voice is espeak-ng, each sentence on its standard input', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  const l = linux(on, ['/usr/bin/espeak-ng'])
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'fix it', turnId: 'l1' })
+  await $.turn.complete({ answer: SHORT_REPLY, durationMs: 10, isAborted: false, turnId: 'l1', reason: 'answer' })
+  await clock.advance(1)
+
+  expect(spoken).toEqual([])
+  expect(l.spawned).toEqual([
+    { argv: ['/usr/bin/espeak-ng', '--stdin'], input: 'Fixed the login bug.\n' },
+    { argv: ['/usr/bin/espeak-ng', '--stdin'], input: 'Tests pass now.\n' },
+  ])
+
+  await command($, 'voice en-gb')
+  await clock.advance(1)
+  expect(l.spawned.at(-1)?.argv).toEqual(['/usr/bin/espeak-ng', '-v', 'en-gb', '--stdin'])
+
+  // Stop ends only what Clausper started: no killall on Linux.
+  await command($, 'stop')
+  expect(l.commands.some(argv => argv[0] === 'killall')).toBe(false)
+})
+
+test('linux: Kokoro clips play through pw-play, uv from ~/.local/bin', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  const l = linux(on, [
+    '/usr/bin/espeak-ng',
+    '/usr/bin/pw-play',
+    '/home/ken/.local/bin/uv',
+    '/home/ken/.clausper/models/kokoro-v1.0.onnx',
+    '/home/ken/.clausper/models/voices-v1.0.bin',
+  ])
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await command($, 'voice kokoro')
+  await clock.advance(1)
+  l.spawned.length = 0
+
+  await $.turn.start({ text: 'fix it', turnId: 'l2' })
+  await $.turn.complete({ answer: SHORT_REPLY, durationMs: 10, isAborted: false, turnId: 'l2', reason: 'answer' })
+  await clock.advance(1)
+
+  expect(spoken).toEqual([])
+  expect(l.engineAudio).toEqual([])
+  expect(l.spawned[0]?.argv[0]).toBe('/home/ken/.local/bin/uv')
+  expect(l.spawned.slice(1).map(run => run.argv)).toEqual([
+    ['/usr/bin/pw-play', `${CLIPS}/001.wav`],
+    ['/usr/bin/pw-play', `${CLIPS}/002.wav`],
+  ])
+})
+
+test('linux: setup and voices speak Linux', async ($, on) => {
+  const spoken: string[] = []
+  engine(on, spoken)
+  linux(on, ['/usr/bin/espeak-ng'])
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const setup = await command($, 'setup')
+  expect(setup.text).toContain('sudo apt install sox')
+  expect(setup.text).toContain('build whisper.cpp')
+  expect(setup.text).toContain('system voice: /usr/bin/espeak-ng')
+  expect(setup.text).toContain('audio player (Kokoro clips): missing')
+  expect(setup.text).toContain('astral.sh/uv/install.sh')
+  expect(setup.text).not.toContain('brew')
+
+  const voices = await command($, 'voices')
+  expect(voices.text).toContain('System voices (2): en-gb, en-us')
+})

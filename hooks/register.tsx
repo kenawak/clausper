@@ -2,6 +2,18 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import { BEEP_START, BEEP_STOP } from './beeps'
+import {
+  binDirs,
+  codeDirs,
+  installHint,
+  isLinux,
+  playCue,
+  playFile,
+  sayWithSystem,
+  speechReport,
+  stopSystemVoice,
+  systemVoices,
+} from './platform'
 
 import type { Change, ListenMode, TurnRecord, View } from '../types'
 
@@ -362,14 +374,14 @@ const kokoroVoice = async ($: Engine) => {
   return typeof voice === 'string' && KOKORO_VOICES.includes(voice) ? voice : null
 }
 
-// uv from the package managers' folders or uv's own installer folder, never PATH;
+// uv from the package managers' folders or uv's own installer folder (~/.local/bin), never PATH;
 // the model files only from ~/.clausper/models.
 const findKokoro = async ($: Engine): Promise<Kokoro> => {
   const home = await $.env.get('HOME')
   if (home === undefined || !home.startsWith('/')) return { uv: null, model: null, voices: null }
   const cwd = await $.session.cwd()
   const uvOverride = await $.env.get('CLAUSPER_UV')
-  const uv = await firstPresent($, ['uv'], ['/opt/homebrew/bin', '/usr/local/bin', `${home}/.local/bin`], uvOverride, cwd)
+  const uv = await firstPresent($, ['uv'], [...(await binDirs($)), `${home}/.local/bin`], uvOverride, cwd)
   const dir = `${home}/.clausper/models`
   let model: string | null = null
   for (const name of KOKORO_MODELS) {
@@ -541,7 +553,6 @@ let clipChain: Promise<void> = Promise.resolve()
 let playback: AbortController | null = null
 
 const playClip = async ($: Engine, path: string, sentence: string, generation: number) => {
-  const bytes = await $.fs.read(path, { as: 'bytes' })
   const before = clipChain
   let finished = () => {}
   clipChain = new Promise<void>(resolve => {
@@ -553,7 +564,7 @@ const playClip = async ($: Engine, path: string, sentence: string, generation: n
     await update($, caption, () => sentence)
     const control = new AbortController()
     playback = control
-    await $.audio.play({ base64: bytes.base64, mime: 'audio/wav' }, { signal: control.signal })
+    await playFile($, path, control.signal)
   } finally {
     finished()
   }
@@ -601,7 +612,7 @@ const speakNow = async ($: Engine, what: string | Utterance) => {
     for (; index < sentences.length && generation === speakGeneration; index += 1) {
       const sentence = sentences[index] ?? ''
       await update($, caption, () => sentence)
-      await $.audio.speak(sentence, voice)
+      await sayWithSystem($, sentence, voice?.voice)
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
@@ -619,9 +630,9 @@ const speakNow = async ($: Engine, what: string | Utterance) => {
   }
 }
 
-const playBeep = async ($: Engine, clip: { base64: string; mime: string }) => {
+const playBeep = async ($: Engine, cue: { base64: string; mime: string; hz: number }) => {
   try {
-    await $.audio.play(clip)
+    await playCue($, { base64: cue.base64, mime: cue.mime }, cue.hz)
   } catch {
     // no player on this platform: listening still works, just without the cue
   }
@@ -639,12 +650,7 @@ const stopSpeaking = async ($: Engine) => {
   playback?.abort()
   playback = null
   for (const synthesis of speaking) synthesis.cancel()
-  try {
-    const user = await $.env.get('USER')
-    await $.process.run(user ? ['killall', '-u', user, 'say'] : ['killall', 'say'], { timeoutMs: 3000 })
-  } catch {
-    // nothing was speaking
-  }
+  await stopSystemVoice($)
   await update($, caption, () => null)
   await update($, isSpeaking, () => false)
 }
@@ -668,8 +674,9 @@ type Ears = { recorder: string | null; whisper: string | null; model: string | n
 // Looks only in the package managers' own folders, never on PATH, so a program
 // planted earlier on PATH cannot receive the microphone audio. An explicit
 // override (CLAUSPER_RECORDER, CLAUSPER_WHISPER) is honored when the file exists.
+const SHARED_TEMP = ['/tmp/', '/private/tmp/', '/var/tmp/', '/dev/shm/']
 const isSafeOverride = (path: string, cwd: string) =>
-  path.startsWith('/') && !path.startsWith('/tmp/') && !path.startsWith('/private/tmp/') && !path.startsWith(`${cwd}/`)
+  path.startsWith('/') && !SHARED_TEMP.some(temp => path.startsWith(temp)) && !path.startsWith(`${cwd}/`)
 
 const firstPresent = async ($: Engine, names: string[], dirs: string[], override: string | undefined, cwd: string) => {
   if (override !== undefined && override !== '' && isSafeOverride(override, cwd)) {
@@ -690,7 +697,9 @@ const findEars = async ($: Engine): Promise<Ears> => {
   // No home folder means no trustworthy place for the model: do not listen.
   if (home === undefined || !home.startsWith('/')) return { recorder: null, whisper: null, model: null }
   const cwd = await $.session.cwd()
-  const dirs = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
+  const dirs = await binDirs($)
+  // whisper.cpp is Homebrew's on macOS; on Linux it is often built and installed to ~/.local/bin.
+  const whisperDirs = (await isLinux($)) ? [...dirs, `${home}/.local/bin`] : dirs.slice(0, 2)
   const modelOverride = await $.env.get('CLAUSPER_WHISPER_MODEL')
   const modelPath = modelOverride !== undefined && isSafeOverride(modelOverride, cwd) ? modelOverride : `${home}/.clausper/models/${MODEL_FILE}`
   const hasModel = await $.fs.exists(modelPath)
@@ -698,7 +707,7 @@ const findEars = async ($: Engine): Promise<Ears> => {
   const whisperOverride = await $.env.get('CLAUSPER_WHISPER')
   return {
     recorder: await firstPresent($, ['rec'], dirs, recorderOverride, cwd),
-    whisper: await firstPresent($, ['whisper-cli', 'whisper-cpp'], dirs.slice(0, 2), whisperOverride, cwd),
+    whisper: await firstPresent($, ['whisper-cli', 'whisper-cpp'], whisperDirs, whisperOverride, cwd),
     model: hasModel ? modelPath : null,
   }
 }
@@ -721,10 +730,13 @@ const kokoroPackages = async ($: Engine, kit: Kokoro) => {
   return 'missing  → /clausper voice install (fetches the pinned packages once, about 130 MB)'
 }
 
-const voiceReport = (kit: Kokoro, packages: string, chosen: string | null) =>
+// uv's own installer on Linux, Homebrew's on macOS.
+const uvHint = async ($: Engine) => ((await isLinux($)) ? 'install uv (curl -LsSf https://astral.sh/uv/install.sh | sh)' : 'brew install uv')
+
+const voiceReport = (kit: Kokoro, packages: string, chosen: string | null, uvInstall: string) =>
   [
     `voice: ${chosen === null ? 'system  (for a natural voice: /clausper voice kokoro)' : `Kokoro ${chosen}`}`,
-    `uv (runs Kokoro): ${kit.uv ?? 'missing  → brew install uv (or set CLAUSPER_UV)'}`,
+    `uv (runs Kokoro): ${kit.uv ?? `missing  → ${uvInstall} (or set CLAUSPER_UV)`}`,
     `Kokoro model: ${kit.model ?? `missing  → save ${KOKORO_MODELS[0]} to ~/.clausper/models/ (see the README)`}`,
     `Kokoro voices: ${kit.voices ?? `missing  → save ${KOKORO_VOICES_FILE} to ~/.clausper/models/ (see the README)`}`,
     `Kokoro packages: ${packages}`,
@@ -735,7 +747,7 @@ const voiceReport = (kit: Kokoro, packages: string, chosen: string | null) =>
 const installKokoro = async ($: Engine) => {
   const kit = await findKokoro($)
   if (kit.uv === null) {
-    $.ui.toast('Clausper: install uv first (brew install uv), then run /clausper voice install again')
+    $.ui.toast(`Clausper: ${await uvHint($)} first, then run /clausper voice install again`)
     return
   }
   $.ui.status('Clausper: installing the Kokoro voice…')
@@ -763,10 +775,12 @@ const installKokoro = async ($: Engine) => {
   }
 }
 
-const earsReport = (ears: Ears) =>
+const earsReport = async ($: Engine, ears: Ears) =>
   [
-    `recorder (sox rec): ${ears.recorder ?? 'missing  → brew install sox (or set CLAUSPER_RECORDER)'}`,
-    `whisper (whisper.cpp): ${ears.whisper ?? 'missing  → brew install whisper-cpp'}`,
+    `recorder (sox rec): ${ears.recorder ?? `missing  → ${await installHint($, 'sox', 'sox')} (or set CLAUSPER_RECORDER)`}`,
+    `whisper (whisper.cpp): ${
+      ears.whisper ?? `missing  → ${(await isLinux($)) ? 'build whisper.cpp (see the README) or set CLAUSPER_WHISPER' : 'brew install whisper-cpp'}`
+    }`,
     `model: ${ears.model ?? `missing  → save ${MODEL_FILE} to ~/.clausper/models/ (see the README)`}`,
   ].join('\n')
 
@@ -1039,14 +1053,21 @@ const describeChange = async ($: Engine, change: Change): Promise<{ text: string
 // Opens a file for editing only: `code --goto` when VS Code's CLI is installed in
 // a known folder, else macOS `open -t` (the default text editor). Never plain
 // `open`, which would launch a .command, .app or .pkg instead of showing it.
+// Linux has no such safe fallback (xdg-open runs a .desktop file), so without
+// VS Code the path is left to copy.
 const openInEditor = async ($: Engine, path: string) => {
   if (path === '') return
-  for (const code of ['/opt/homebrew/bin/code', '/usr/local/bin/code']) {
+  for (const dir of await codeDirs($)) {
+    const code = `${dir}/code`
     const isThere = await $.fs.exists(code)
     if (isThere) {
       await $.process.run([code, '--goto', path], { timeoutMs: 5000 })
       return
     }
+  }
+  if (await isLinux($)) {
+    $.ui.toast('Clausper: no VS Code command found; press c to copy the path')
+    return
   }
   await $.process.run(['open', '-t', '--', path], { timeoutMs: 5000 })
 }
@@ -1180,11 +1201,11 @@ export const register: Register = on => {
         const chosen = await kokoroVoice($)
         const speaks = packages === 'installed'
         return {
-          text: `Listening\n${earsReport(ears)}\n${
+          text: `Listening\n${await earsReport($, ears)}\n${
             ready
               ? 'Ready to listen. Try /clausper listen, or turn it on after every reply with /clausper listen auto.'
               : 'Install what is missing, then run /clausper setup again.'
-          }\n\nVoice\n${voiceReport(kit, packages, chosen)}\n${
+          }\n\nVoice\n${[await speechReport($), voiceReport(kit, packages, chosen, await uvHint($))].filter(part => part !== '').join('\n')}\n${
             speaks
               ? chosen === null
                 ? 'Kokoro is ready. Turn it on with /clausper voice kokoro.'
@@ -1225,11 +1246,7 @@ export const register: Register = on => {
         return { text: `Clausper voice set to ${arg}.` }
       }
       case 'voices': {
-        const listed = await $.process.run(['say', '-v', '?'], { timeoutMs: 10000 })
-        const names = listed.stdout
-          .split('\n')
-          .map(line => line.split(/\s{2,}/)[0]?.trim() ?? '')
-          .filter(name => name !== '')
+        const names = await systemVoices($)
         return {
           text: `${
             names.length === 0 ? 'No system voices found.' : `System voices (${names.length}): ${names.join(', ')}`

@@ -1,8 +1,9 @@
 # Clausper
 
-Clausper whispers. After every Claude Code reply it speaks a short summary through your Mac's
-system voice, or through Kokoro, an optional natural-sounding neural voice that also runs on your
-Mac, so you do not have to read a long terminal answer to know what just happened.
+Clausper whispers. After every Claude Code reply it speaks a short summary through your
+computer's system voice, or through Kokoro, an optional natural-sounding neural voice that also
+runs on your machine, so you do not have to read a long terminal answer to know what just
+happened. It runs on macOS and Linux.
 While it speaks, the current sentence shows as a caption above the prompt and in the pane.
 It also keeps a pane beside the chat listing each turn, the files it touched, and the
 commands it ran. Pressing a file shows its uncommitted diff, opens it in your editor, or
@@ -42,6 +43,10 @@ with a local model.
 
     brew install sox whisper-cpp
 
+On Linux, install sox from your distribution (`sudo apt install sox`) and build whisper.cpp
+(https://github.com/ggml-org/whisper.cpp), then put `whisper-cli` in `/usr/local/bin` or
+`~/.local/bin`, or point `CLAUSPER_WHISPER` at it.
+
 Then download the model file `ggml-base.en.bin` (141 MB) from the whisper.cpp model page,
 https://huggingface.co/ggerganov/whisper.cpp/tree/main, and save it as
 `~/.clausper/models/ggml-base.en.bin`. Nothing is executed from the download: it is a data file
@@ -53,12 +58,28 @@ only a sentence that starts with "Clausper" (or "Claude") is sent, anything else
 the prompt box for you to confirm. `/clausper wake off` turns that off. `/clausper listen fill` puts what you said in
 the prompt box instead of sending it, for when you want to check it first. `/clausper listen off`
 turns it off. Say "cancel" or "nothing" to skip a turn. macOS asks for microphone access the
-first time; allow it for your terminal app.
+first time; allow it for your terminal app. On Linux sox records from the default input of
+PipeWire, PulseAudio or ALSA.
+
+## Linux
+
+Claude Code speaks and plays sound only on macOS, so on Linux Clausper runs its own programs:
+
+    sudo apt install espeak-ng sox pipewire-bin
+
+- The system voice is `espeak-ng` (or `espeak`, or speech-dispatcher's `spd-say`).
+  `/clausper voices` lists its languages; `/clausper voice en-gb` picks one.
+- Kokoro clips play through `pw-play`, `paplay`, `aplay` or sox's `play`, whichever is installed
+  first. Kokoro is the better voice on Linux too, and installs the same way (uv from
+  https://docs.astral.sh/uv/ instead of Homebrew).
+- The listening cues are made by sox's `play`, installed with sox.
+- "Open in editor" uses VS Code's `code` when it is installed; otherwise copy the path.
+  `xdg-open` is never used, because it can run a `.desktop` file instead of showing it.
 
 ## A natural voice: Kokoro (optional)
 
-The macOS system voices can sound robotic. Kokoro is an open-weight neural text-to-speech model
-(82 million parameters, Apache 2.0) that sounds close to a person and runs on your Mac's CPU, the
+The system voices can sound robotic. Kokoro is an open-weight neural text-to-speech model
+(82 million parameters, Apache 2.0) that sounds close to a person and runs on your computer's CPU, the
 same way listen mode runs whisper.cpp: nothing you hear is made anywhere else.
 
     brew install uv
@@ -114,15 +135,23 @@ third-party service, and your voice recordings never leave the machine.
 **Programs it runs, and why.** All are run directly, without a shell, with fixed arguments except
 where noted.
 
-- The macOS speech synthesizer, through Claude Code's own speech call, to speak summaries.
-- `killall -u <your user> say`, when you press stop. This ends every `say` of yours, not only Clausper's.
-- `say -v ?`, for `/clausper voices`, to list installed voices.
+- `uname -s`, once per load, to tell macOS from Linux.
+- macOS: the speech synthesizer, through Claude Code's own speech call, to speak summaries;
+  `killall -u <your user> say`, when you press stop (this ends every `say` of yours, not only
+  Clausper's); `say -v ?`, for `/clausper voices`.
+- Linux: `espeak-ng --stdin` (or `espeak`, or `spd-say -w -e`) with each sentence on its
+  standard input, so nothing in it is read as an option; `pw-play`, `paplay`, `aplay -q` or
+  `play -q` on each Kokoro clip; sox's `play -n synth` for the listening cues; and
+  `espeak-ng --voices` or `spd-say -L` for `/clausper voices`. All are looked up in `/usr/bin`,
+  `/usr/local/bin` and `/home/linuxbrew/.linuxbrew/bin`. Stop ends only these programs.
 - `mktemp -d`, when listening, to create a private folder (mode 0700, under your temporary
   directory) for the one recording.
 - `rec` (sox), when listening, to record 16 kHz mono from the default microphone until a pause,
   into that folder. The recorder is looked up only in `/opt/homebrew/bin`, `/usr/local/bin` and
-  `/usr/bin`, or at the path in `CLAUSPER_RECORDER`; PATH is never searched. An override must be
-  an absolute path outside your temporary folder and outside the session's project folder.
+  `/usr/bin` (on Linux `/usr/bin`, `/usr/local/bin` and `/home/linuxbrew/.linuxbrew/bin`), or at
+  the path in `CLAUSPER_RECORDER`; PATH is never searched. An override must be an absolute path
+  outside the shared temporary folders (`/tmp`, `/var/tmp`, `/dev/shm`) and outside the session's
+  project folder.
 - `whisper-cli` (whisper.cpp), found the same way or at `CLAUSPER_WHISPER`, to transcribe that
   file with the model in `~/.clausper/models` or the file named by `CLAUSPER_WHISPER_MODEL`.
 - `rm -rf` on that one private folder afterwards, success or failure.
@@ -131,7 +160,7 @@ where noted.
   Code's own audio call plays; the folder is deleted afterwards. `--offline`: speaking never
   touches the network. `--locked`: only the packages pinned with hashes in `tts/kokoro.py.lock`
   run. `--no-config`: a `uv.toml` or `pyproject.toml` in your project cannot change where
-  packages come from. uv is looked up only in `/opt/homebrew/bin`, `/usr/local/bin` and
+  packages come from. uv is looked up only in those same folders and
   `~/.local/bin` (where uv's own installer puts it), or at `CLAUSPER_UV` under the same rules as
   the other overrides; the model files only in `~/.clausper/models`. `/clausper setup` runs the
   same command with `--list` to check that Kokoro can load. Stop ends the playback and the runner.
@@ -145,8 +174,9 @@ where noted.
 - `git diff --no-ext-diff -- <file>` and `git status --porcelain -- <file>`, run in the file's
   folder with external diff tools and the file monitor disabled, when you press a file in the pane.
 - `code --goto <file>` when VS Code's command is installed in `/opt/homebrew/bin` or
-  `/usr/local/bin`, else `open -t <file>` (your default text editor), when you press "open in
-  editor". Never plain `open`, which would launch a script or app instead of showing it.
+  `/usr/local/bin` (on Linux `/usr/bin`, `/usr/local/bin` or `/snap/bin`), else on macOS
+  `open -t <file>` (your default text editor), when you press "open in editor". Never plain
+  `open` or `xdg-open`, which would launch a script or app instead of showing it.
 
 **Prompts it submits.** In listen mode, after you speak, Clausper submits the transcribed words as
 your next message, as whisper transcribed them. The only edits are the removal of the wake word
@@ -191,5 +221,5 @@ The landing page is its own repository: https://github.com/kenawak/clausper-site
 
 ## Requirements
 
-macOS, for the system voice and microphone. On other platforms the pane and captions work and
-nothing is spoken. The Kokoro voice needs uv and about 450 MB for the model and its packages.
+macOS, or Linux with espeak-ng for the system voice and a player such as `pw-play` for
+Kokoro (see Linux above). On other platforms the pane and captions work and nothing is spoken. The Kokoro voice needs uv and about 450 MB for the model and its packages.

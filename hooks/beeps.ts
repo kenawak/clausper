@@ -54,7 +54,8 @@ const sineWav = (hz: number) => {
   return new Uint8Array(buffer)
 }
 
-export const beepClip = (hz: number) => ({ base64: toBase64(sineWav(hz)), mime: 'audio/wav' })
+// `hz` lets a player without the clip (Linux, sox `play`) make the same tone.
+export const beepClip = (hz: number) => ({ base64: toBase64(sineWav(hz)), mime: 'audio/wav', hz })
 
 /** Listening has started: speak now. */
 export const BEEP_START = beepClip(880)

@@ -14,7 +14,7 @@ Clausper is provided "as is", without warranty of any kind, express or implied, 
 
 - Clausper acts inside your own Claude Code account and is bound by Anthropic's terms for that account. Usage it generates, such as summary calls, counts against your plan.
 - In listen mode, Clausper submits transcribed speech as your prompt. You are responsible for what you say and for reviewing what Claude does in response. Use fill mode if you want to confirm each prompt first.
-- Microphone access is granted by you, through macOS, and can be withdrawn at any time in System Settings.
+- Microphone access is granted by you, through macOS (and can be withdrawn at any time in System Settings) or through your Linux audio system.
 
 ## Third-party software
 

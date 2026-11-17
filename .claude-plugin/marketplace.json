@@ -8,7 +8,7 @@
     {
       "name": "clausper",
       "source": "./",
-      "description": "Speaks a short summary of every Claude Code reply, captions it live, lists the files that changed, and lets you answer by voice. Runs on your subscription; your voice stays on your Mac.",
+      "description": "Speaks a short summary of every Claude Code reply, captions it live, lists the files that changed, and lets you answer by voice. Runs on your subscription; your voice stays on your machine (macOS and Linux).",
       "category": "productivity",
       "tags": [
         "voice",
@@ -20,7 +20,8 @@
         "hands-free",
         "whisper",
         "local-first",
-        "macos"
+        "macos",
+        "linux"
       ]
     }
   ],

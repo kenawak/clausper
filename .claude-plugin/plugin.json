@@ -1,7 +1,7 @@
 {
   "name": "clausper",
   "version": "0.3.1",
-  "description": "Speaks a short summary of every Claude Code reply, captions it live, lists the files that changed, and lets you answer by voice. Runs on your subscription; your voice stays on your Mac.",
+  "description": "Speaks a short summary of every Claude Code reply, captions it live, lists the files that changed, and lets you answer by voice. Runs on your subscription; your voice stays on your machine (macOS and Linux).",
   "types": "./types/index.d.ts",
   "license": "MIT",
   "author": {
@@ -20,7 +20,8 @@
     "hands-free",
     "whisper",
     "local-first",
-    "macos"
+    "macos",
+    "linux"
   ],
   "displayName": "Clausper",
   "icon": "./.claude-plugin/icon.png",

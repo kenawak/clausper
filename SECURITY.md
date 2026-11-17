@@ -19,15 +19,17 @@ uses, each pinned by version and hash.
   pinned packages from PyPI with uv. Speaking runs uv with `--offline`. There is no telemetry
   and no other endpoint.
 - **Programs.** Search for `process.run`. Every command is listed in the README under
-  "What Clausper does on your machine": the speech synthesizer, `killall -u <you> say`,
-  `say -v ?`, `mktemp`, `rec`, `whisper-cli`, `rm -rf` on the one private recording folder,
+  "What Clausper does on your machine": `uname -s`, the speech synthesizer, `killall -u <you> say`,
+  `say -v ?`, on Linux `espeak-ng`/`espeak`/`spd-say` and `pw-play`/`paplay`/`aplay`/`play`, `mktemp`, `rec`, `whisper-cli`, `rm -rf` on the one private recording folder,
   `uv` for the optional Kokoro voice, `mkdir`, `mv` and `rm -rf` on `~/.clausper/floor` (the
   turn-taking folder shared by your sessions), `git diff`, `git status`, and `open` on a file
   you pressed. All run directly, without a shell.
 - **Where programs come from.** The recorder and transcriber are looked up in the package
-  managers' own folders (`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`). PATH is never
+  managers' own folders (`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`; on Linux `/usr/bin`,
+  `/usr/local/bin`, `/home/linuxbrew/.linuxbrew/bin`, and `~/.local/bin` for whisper.cpp). PATH is never
   searched. The overrides `CLAUSPER_RECORDER`, `CLAUSPER_WHISPER` and `CLAUSPER_WHISPER_MODEL`
-  are honored only when they are absolute paths outside the temporary folder and outside the
+  are honored only when they are absolute paths outside the shared temporary folders (`/tmp`,
+  `/private/tmp`, `/var/tmp`, `/dev/shm`) and outside the
   session's project folder, so a repository cannot point them at a file it ships. Without a
   `HOME`, Clausper does not listen at all. `uv` is looked up the same way, in
   `/opt/homebrew/bin`, `/usr/local/bin` or `~/.local/bin`, or at `CLAUSPER_UV` under the same
@@ -43,8 +45,11 @@ uses, each pinned by version and hash.
 - **Prompts.** Search for `prompt.submit` and `prompt.fill`. The only text ever submitted is
   your transcribed speech, minus the wake word and whisper's non-speech tags. It is tagged as the
   plugin's for hooks and the transcript; the model reads it as your words, which is the point.
-- **Opening files.** "Open in editor" uses `code --goto` or `open -t`, so a file Claude wrote is
-  shown in a text editor, never launched.
+- **Opening files.** "Open in editor" uses `code --goto` or, on macOS, `open -t`, so a file Claude
+  wrote is shown in a text editor, never launched. Linux has no equally safe fallback (`xdg-open`
+  runs `.desktop` files), so without VS Code nothing is opened.
+- **Speech text on Linux.** The sentence goes to espeak-ng or spd-say on standard input, never as
+  an argument, so a reply cannot pass options to the synthesizer.
 - **The summary prompt.** The reply is sent inside `<reply>` tags with any such tags inside it
   neutralized and an instruction to treat it as text. A reply can still steer the wording of its
   own summary, which is why the spoken line is a summary and never a command to you.
@@ -83,6 +88,7 @@ one person can, and fixes ship as a new version through the same marketplace ins
 
 ## Known limits
 
-- "Stop" ends every `say` process of your user, not only Clausper's.
+- On macOS "Stop" ends every `say` process of your user, not only Clausper's. On Linux it ends
+  only the programs Clausper started.
 - A spoken summary is text written by a model from a reply that a repository can influence.
   Clausper never acts on it; only you do, and only through Claude Code's normal prompts.
