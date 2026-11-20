@@ -24,8 +24,9 @@ uses, each pinned by version and hash.
   "What Clausper does on your machine": `uname -s`, the speech synthesizer, `killall -u <you> say`,
   `say -v ?`, on Linux `espeak-ng`/`espeak`/`spd-say` and `pw-play`/`paplay`/`aplay`/`play`, `mktemp`, `rec`, `whisper-cli`, `rm -rf` on the one private recording folder,
   `uv` for the optional Kokoro voice, `mkdir`, `mv` and `rm -rf` on `~/.clausper/floor` (the
-  turn-taking folder shared by your sessions), `git diff`, `git status`, and `open` on a file
-  you pressed. All run directly, without a shell.
+  turn-taking folder shared by your sessions), `git diff`, `git status`, `open` on a file
+  you pressed, and on macOS `shasum`, `xcode-select -p` and `xcrun swiftc` to build the shortcut
+  helper, then the helper itself. All run directly, without a shell.
 - **Where programs come from.** The recorder and transcriber are looked up in the package
   managers' own folders (`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`; on Linux `/usr/bin`,
   `/usr/local/bin`, `/home/linuxbrew/.linuxbrew/bin`, and `~/.local/bin` for whisper.cpp). PATH is never
@@ -42,6 +43,14 @@ uses, each pinned by version and hash.
   a private `mktemp -d` folder that is deleted afterwards. The runner reads sentences on standard
   input and the two model files, writes WAV files into that folder, and prints their paths;
   Clausper uses only the count of those lines and plays files at paths it built itself.
+- **The shortcut helper (macOS).** `keys/clausper-keys.swift`, about a hundred lines, is the one
+  native program Clausper makes. It is built on your Mac from that source with Apple's own
+  `xcrun swiftc`, never downloaded, and rebuilt only when the source's SHA-256 changes. It calls
+  `RegisterEventHotKey` for the chords you set, so macOS tells it about those presses alone; it
+  cannot read other keys and asks for no Accessibility or Input Monitoring permission. It prints
+  `ready`, `error` or `press` lines, writes its process id into `~/.clausper/run`, stops an earlier
+  helper of the same session (only a process whose path ends in `/clausper-keys`), and exits when
+  its session does. `/clausper keys off` stops it and never starts it again.
 - **Recordings.** Each listen creates a private folder with `mktemp -d` (mode 0700), records one
   file into it, transcribes it locally, and deletes the folder, success or failure.
 - **Prompts.** Search for `prompt.submit` and `prompt.fill`. The only text ever submitted is

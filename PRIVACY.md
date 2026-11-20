@@ -12,7 +12,8 @@ Clausper runs on your computer. Your voice, your recordings and the files it sho
 - **Speech.** Summaries are spoken by the system voice on your machine (macOS speech, or espeak-ng on Linux), or by the optional Kokoro voice, a model that also runs on your machine. Nothing is sent to a speech service. Kokoro's audio is written into a private temporary folder, played, and deleted.
 - **Microphone.** In listen mode, after you turn it on, Clausper records from your default microphone until you pause, writes the audio into a private folder it creates in your temporary directory, transcribes it with whisper.cpp running locally, submits the words as your next prompt (or places them in the prompt box), and deletes the folder. Recording only happens after you enable listen mode or press listen. macOS asks for microphone permission the first time.
 - **Files and commands.** The pane lists the paths of files Claude edited and the commands it ran in your session, and shows a file's git diff or contents when you ask. This stays on your machine.
-- **Settings.** Your chosen voice, listen mode, wake-word and private-mode switches are stored in the plugin store Claude Code provides on your machine.
+- **Shortcuts.** On macOS a small helper registers the key chords you set (⌃⌥S by default) with the system and is told only when one of them is pressed. It sees no other keys and records nothing.
+- **Settings.** Your chosen voice, listen mode, wake-word and private-mode switches, and your shortcuts, are stored in the plugin store Claude Code provides on your machine.
 
 ## What the mod does not do
 

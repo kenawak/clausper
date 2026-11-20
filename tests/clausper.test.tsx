@@ -522,6 +522,117 @@ test('the floor: stop while waiting gives up the turn, and the summary still rea
   await ui.unmount()
 })
 
+// ---------------------------------------------------------------- shortcuts
+
+const KEYS_BIN = '/home/ken/.clausper/bin/clausper-keys'
+const STOP_FILE = '/home/ken/.clausper/run/stop'
+
+// A Mac with the command line tools: the helper is built from its source, then
+// started; it says each chord is ready, and after `pressAfter` ms presses stop.
+// `stop` is the stamp another session left in ~/.clausper/run/stop.
+const macKeys = (on: On, clock: { sleep: (ms: number) => Promise<void> }, options: { pressAfter?: number; busyFor?: number } = {}) => {
+  const commands: (readonly string[])[] = []
+  const helpers: (readonly string[])[] = []
+  const writes = new Map<string, string>()
+  const stamp = { stop: '0' }
+  let busy = options.busyFor ?? 0
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/ken' : e.name === 'USER' ? 'ken' : undefined }))
+  on('fs.exists', () => ({ value: true }))
+  on('fs.write', (_, e) => {
+    writes.set(e.path, e.text)
+    return { value: undefined }
+  })
+  on('fs.read', (_, e) => ({ value: e.path === STOP_FILE ? stamp.stop : e.path === `${KEYS_BIN}.sha256` ? 'built-before\n' : '' }))
+  on('process.run', (_, e) => {
+    commands.push(e.argv)
+    const [cmd = '', first = ''] = e.argv
+    if (cmd === 'uname') return { value: { ...OK_RUN, stdout: 'Darwin\n' } }
+    if (cmd === '/usr/bin/shasum') return { value: { ...OK_RUN, stdout: `source-digest  ${e.argv.at(-1)}\n` } }
+    if (cmd === 'mkdir' && first === '-m' && busy > 0) {
+      busy -= 1
+      return { value: { ...OK_RUN, exitCode: 1, stderr: 'mkdir: File exists' } }
+    }
+    return { value: OK_RUN }
+  })
+  on('process.spawn', async function* (_, e) {
+    helpers.push(e.argv)
+    for (const binding of e.argv.slice(1)) {
+      const [action, chord] = binding.split('=')
+      yield { stream: 'stdout' as const, text: `ready ${action} ${chord}\n` }
+    }
+    if (options.pressAfter !== undefined && helpers.length === 1) {
+      await clock.sleep(options.pressAfter)
+      yield { stream: 'stdout' as const, text: 'press stop\n' }
+    }
+    return { value: { code: 0, signal: null } }
+  })
+  return { commands, helpers, writes, stamp }
+}
+
+test('shortcuts: the helper is built from its source and its stop key tells every session to stop', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  const k = macKeys(on, clock, { pressAfter: 5000 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(1)
+
+  const build = k.commands.find(argv => argv[0] === '/usr/bin/xcrun')
+  expect(build?.slice(1, 3)).toEqual(['swiftc', '-O'])
+  expect(build?.at(-1)?.endsWith('/keys/clausper-keys.swift')).toBe(true)
+  expect(k.writes.get(`${KEYS_BIN}.sha256`)).toBe('source-digest\n')
+  expect(k.helpers).toEqual([[KEYS_BIN, 'stop=ctrl+alt+s']])
+  const shown = await command($, 'keys')
+  expect(shown.text).toContain('stop   ⌃⌥S')
+  expect(shown.text).toContain('Helper: stop: ⌃⌥S')
+
+  await clock.advance(5000)
+  // Stamped with the time of the press, which every busy session reads.
+  expect(Number(k.writes.get(STOP_FILE))).toBe(5000)
+})
+
+test('shortcuts: a stop another session stamped ends this one\'s wait for its turn', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  const k = macKeys(on, clock, { busyFor: 8 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'fix it', turnId: 's1' })
+  await $.turn.complete({ answer: SHORT_REPLY, durationMs: 10, isAborted: false, turnId: 's1', reason: 'answer' })
+  await clock.advance(1)
+
+  k.stamp.stop = String(clock.now() + 1)
+  await clock.advance(5000)
+  expect(spoken).toEqual([])
+})
+
+test('shortcuts: /clausper keys rebinds, refuses what is no chord, and turns them off and on', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken)
+  const k = macKeys(on, clock)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(1)
+
+  expect((await command($, 'keys stop Cmd+Shift+S')).text).toContain('stop   ⌘⇧S')
+  await clock.advance(1)
+  expect(k.helpers.at(-1)).toEqual([KEYS_BIN, 'stop=cmd+shift+s'])
+  expect((await command($, 'keys stop hyper+x')).text).toContain('is not a shortcut Clausper can use')
+  expect((await command($, 'keys stop s')).text).toContain('is not a shortcut Clausper can use')
+  expect((await command($, 'keys mute cmd+shift+s')).text).toContain('already stop')
+  expect((await command($, 'keys again ctrl+alt+a')).text).toContain('again  ⌃⌥A')
+  await clock.advance(1)
+  expect(k.helpers.at(-1)).toEqual([KEYS_BIN, 'stop=cmd+shift+s', 'again=ctrl+alt+a'])
+
+  const started = k.helpers.length
+  expect((await command($, 'keys off')).text).toBe('Clausper shortcuts off.')
+  await clock.advance(1)
+  expect(k.helpers).toHaveLength(started)
+  await command($, 'keys on')
+  await clock.advance(1)
+  expect(k.helpers.at(-1)).toEqual([KEYS_BIN, 'stop=cmd+shift+s', 'again=ctrl+alt+a'])
+  await command($, 'keys reset')
+  await clock.advance(1)
+  expect(k.helpers.at(-1)).toEqual([KEYS_BIN, 'stop=ctrl+alt+s'])
+})
+
 // ---------------------------------------------------------------- linux
 
 // A Linux machine: Claude Code has no player there, so Clausper runs its own.
@@ -708,7 +819,10 @@ test('kokoro setup: choosing Kokoro on a fresh Mac fetches uv, the model and the
   ])
   expect(m.downloads[0]?.slice(1, 4)).toEqual(['-fsSL', '--proto', '=https'])
   // Each checked before it is moved into place.
-  expect(m.commands.filter(argv => argv[0] === '/usr/bin/shasum')).toHaveLength(3)
+  // (The shortcut helper's own source is hashed too, to know when to rebuild it.)
+  expect(
+    m.commands.filter(argv => argv[0] === '/usr/bin/shasum' && !String(argv.at(-1)).endsWith('/clausper-keys.swift')),
+  ).toHaveLength(3)
   expect(m.present.has('/home/ken/.clausper/bin/uv')).toBe(true)
   expect(m.present.has(`${HOME_MODELS}/kokoro-v1.0.onnx`)).toBe(true)
   // The packages come from the fetched uv, hash-locked; then Kokoro says hello.

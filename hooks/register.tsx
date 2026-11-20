@@ -2,6 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import { BEEP_START, BEEP_STOP } from './beeps'
+import { KEY_ACTIONS, keysHelper, normalChord, runKeysHelper, storedKeys } from './keys'
+import type { KeyAction, KeyBindings } from './keys'
 import {
   binDirs,
   codeDirs,
@@ -305,6 +307,15 @@ const holdFloor = async <T,>($: Engine, work: (turn: FloorTurn) => Promise<T>): 
       floorDepth = Math.max(0, floorDepth - 1)
     }
   }
+  const unwatch = await watchStops($)
+  try {
+    return await holdFloorNow($, work)
+  } finally {
+    unwatch()
+  }
+}
+
+const holdFloorNow = async <T,>($: Engine, work: (turn: FloorTurn) => Promise<T>): Promise<T | undefined> => {
   let taken: { turn: FloorTurn; dir: string } = { turn: 'open', dir: '' }
   try {
     taken = await takeFloor($)
@@ -333,6 +344,146 @@ const holdFloor = async <T,>($: Engine, work: (turn: FloorTurn) => Promise<T>): 
     if (dir !== '') await releaseFloor($, dir)
   }
 }
+
+// ---------------------------------------------------------------- shortcuts
+// The stop shortcut reaches one session's helper (macOS hands a hotkey to one
+// process), so that session stamps ~/.clausper/run/stop, and every session that
+// is speaking, listening or waiting for its turn reads the stamp and stops.
+
+const STOP_POLL_MS = 250
+
+const stopFile = async ($: Engine) => {
+  try {
+    const home = await $.env.get('HOME')
+    return home === undefined || !home.startsWith('/') ? null : `${home}/.clausper/run/stop`
+  } catch {
+    // no environment to read: no stamp to share, and speech goes on without it
+    return null
+  }
+}
+
+const stopStamp = async ($: Engine, path: string) => {
+  try {
+    const stamp = Number(String(await $.fs.read(path)).trim())
+    return Number.isFinite(stamp) ? stamp : 0
+  } catch {
+    return 0
+  }
+}
+
+// Stops this session at once and every other one within STOP_POLL_MS.
+const stopEverywhere = async ($: Engine) => {
+  await stopSpeaking($)
+  const path = await stopFile($)
+  if (path === null) return
+  try {
+    await $.process.run(['mkdir', '-p', '-m', '700', dirName(path)], { timeoutMs: 5000 })
+    await $.fs.write(path, `${await $.clock.now()}\n`)
+  } catch (error) {
+    $.ui.log(`clausper: could not tell the other sessions to stop (${error instanceof Error ? error.message : String(error)})`, { to: 'debug' })
+  }
+}
+
+// While this session holds or waits for the floor: a stop stamped after it
+// started stops it. Resolves the function that ends the watch.
+const watchStops = async ($: Engine) => {
+  const path = await stopFile($)
+  if (path === null) return () => undefined
+  let since = await $.clock.now()
+  let isWatching = true
+  let timer: { cancel: () => void } | null = null
+  const look = async () => {
+    const stamp = await stopStamp($, path)
+    if (!isWatching) return
+    if (stamp > since) {
+      since = stamp
+      await stopSpeaking($)
+    }
+    timer = $.clock.after(STOP_POLL_MS, () => void look())
+  }
+  timer = $.clock.after(STOP_POLL_MS, () => void look())
+  return () => {
+    isWatching = false
+    timer?.cancel()
+  }
+}
+
+// The running helper and what it last said about each binding, for /clausper keys.
+let keysRun: { stop: () => void } | null = null
+let keysNotes: string[] = []
+// The stop chord once the helper holds it ("⌃⌥S"), shown beside the caption's stop.
+let stopChord: string | null = null
+
+const MODIFIER_SYMBOLS: Record<string, string> = {
+  cmd: '⌘', command: '⌘', super: '⌘', shift: '⇧', alt: '⌥', opt: '⌥', option: '⌥', ctrl: '⌃', control: '⌃',
+}
+
+// "ctrl+alt+s" -> "⌃⌥S", as macOS menus write it.
+const chordLabel = (chord: string) =>
+  chord
+    .split('+')
+    .map(part => MODIFIER_SYMBOLS[part] ?? part.toUpperCase())
+    .join('')
+
+const onKeyPress = async ($: Engine, action: KeyAction) => {
+  switch (action) {
+    case 'stop':
+      await stopEverywhere($)
+      return
+    case 'mute': {
+      const muted = !(await read($, isMuted))
+      await update($, isMuted, () => muted)
+      if (muted) await stopSpeaking($)
+      $.ui.toast(muted ? 'Clausper muted' : 'Clausper unmuted')
+      return
+    }
+    case 'again':
+      later($, () => sayLast($))
+      return
+    case 'listen':
+      later($, () => listenOnce($, { ask: false }))
+  }
+}
+
+// (Re)starts the helper with the stored bindings; none stored means the defaults.
+const startKeys = async ($: Engine) => {
+  keysRun?.stop()
+  keysRun = null
+  stopChord = null
+  const keys = storedKeys(await $.store.get('keys'))
+  if (Object.keys(keys).length === 0) {
+    keysNotes = ['off']
+    return
+  }
+  const helper = await keysHelper($)
+  if ('reason' in helper) {
+    keysNotes = [`not available: ${helper.reason}`]
+    $.ui.log(`clausper: no global shortcuts (${helper.reason})`, { to: 'debug' })
+    return
+  }
+  keysNotes = []
+  const run = runKeysHelper($, helper.path, keys, line => {
+    const [kind = '', action = '', ...rest] = line.split(' ')
+    if (kind === 'press' && (KEY_ACTIONS as readonly string[]).includes(action)) {
+      later($, () => onKeyPress($, action as KeyAction))
+    } else if (kind === 'ready') {
+      keysNotes.push(`${action}: ${chordLabel(rest.join(' '))}`)
+      if (action === 'stop') stopChord = chordLabel(rest.join(' '))
+    } else if (kind === 'error') {
+      keysNotes.push(`${action}: ${rest.join(' ')}`)
+      $.ui.toast(`Clausper shortcut ${action}: ${rest.join(' ')}`)
+    }
+  })
+  keysRun = run
+  await run.done
+  if (keysRun === run) {
+    keysRun = null
+    stopChord = null
+  }
+}
+
+const keysText = (keys: KeyBindings) =>
+  KEY_ACTIONS.map(action => `  ${action.padEnd(6)} ${keys[action] === undefined ? '-' : chordLabel(keys[action] ?? '')}`).join('\n')
 
 // The session's folder name, said before its summary when another session spoke first.
 const projectName = async ($: Engine) => {
@@ -1194,7 +1345,7 @@ const kindMark = (change: Change) =>
   change.kind === 'write' ? '+' : change.kind === 'ran' ? '$' : '±'
 
 const USAGE =
-  'Usage: /clausper [mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | setup | voice <name>|kokoro|install | voices | test]'
+  'Usage: /clausper [mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | keys [<action> <chord>|off|on|reset] | setup | voice <name>|kokoro|install | voices | test]'
 
 // ---------------------------------------------------------------- register
 
@@ -1221,7 +1372,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'clausper',
       description:
-        'Clausper: open the pane; or mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | setup | voice <name>|kokoro|install | voices | test',
+        'Clausper: open the pane; or mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | keys | setup | voice <name>|kokoro|install | voices | test',
     })
     const stored = await $.store.get('listenMode')
     if (stored === 'auto' || stored === 'fill' || stored === 'off') {
@@ -1234,6 +1385,7 @@ export const register: Register = on => {
     const storedPrivate = await $.store.get('private')
     if (typeof storedPrivate === 'boolean') await update($, isPrivate, () => storedPrivate)
     void $.ui.open({ id: PANE, title: 'Clausper' })
+    later($, () => startKeys($))
     // Once ever: a natural voice is one command away.
     if ((await $.store.get('kokoroHinted')) !== true && (await kokoroVoice($)) === null) {
       await $.store.set('kokoroHinted', true)
@@ -1306,6 +1458,47 @@ export const register: Register = on => {
             : 'Private mode off: long replies are summarized by Haiku through your session.',
         }
       }
+      case 'keys':
+      case 'shortcuts': {
+        const [first = '', ...chordParts] = arg.toLowerCase().split(/\s+/).filter(part => part !== '')
+        const current = storedKeys(await $.store.get('keys'))
+        if (first === '') {
+          const notes = keysNotes.length === 0 ? 'starting…' : keysNotes.join('; ')
+          return {
+            text: `Clausper shortcuts work from any app, while Claude Code is open (macOS):\n${keysText(current)}\nHelper: ${notes}\n\nChange one with /clausper keys <action> <chord>, e.g. /clausper keys stop cmd+shift+s; clear it with /clausper keys <action> off. Actions: ${KEY_ACTIONS.join(', ')}. /clausper keys off turns them all off, reset brings back the default.`,
+          }
+        }
+        let wanted: KeyBindings | 'off'
+        if (first === 'off') wanted = 'off'
+        else if (first === 'on' || first === 'reset') wanted = storedKeys(first === 'reset' ? undefined : await $.store.get('keysBefore'))
+        else if ((KEY_ACTIONS as readonly string[]).includes(first)) {
+          const action = first as KeyAction
+          const chordText = chordParts.join('')
+          if (chordText === 'off' || chordText === 'none') {
+            wanted = { ...current }
+            delete wanted[action]
+          } else {
+            const chord = normalChord(chordText)
+            if (chord === null) {
+              return { text: `${chordText || '(nothing)'} is not a shortcut Clausper can use: give modifiers and one key, like ctrl+alt+s or cmd+shift+s (a function key such as f13 may stand alone).` }
+            }
+            const taken = KEY_ACTIONS.find(other => other !== action && current[other] === chord)
+            if (taken !== undefined) return { text: `${chordLabel(chord)} is already ${taken}. Change that one first.` }
+            wanted = { ...current, [action]: chord }
+          }
+        } else return { text: USAGE }
+        if (wanted === 'off') await $.store.set('keysBefore', current)
+        await $.store.set('keys', wanted)
+        keysNotes = []
+        later($, () => startKeys($))
+        const keys = storedKeys(wanted)
+        return {
+          text:
+            Object.keys(keys).length === 0
+              ? 'Clausper shortcuts off.'
+              : `Clausper shortcuts:\n${keysText(keys)}\nThey take that key combination from every other app while a Claude Code session runs.`,
+        }
+      }
       case 'setup': {
         const ears = await findEars($)
         const ready = ears.recorder !== null && ears.whisper !== null && ears.model !== null
@@ -1318,7 +1511,7 @@ export const register: Register = on => {
             ready
               ? 'Ready to listen. Try /clausper listen, or turn it on after every reply with /clausper listen auto.'
               : 'Install what is missing, then run /clausper setup again.'
-          }\n\nVoice\n${[await speechReport($), voiceReport(kit, packages, chosen)].filter(part => part !== '').join('\n')}\n${
+          }\n\nShortcuts\n${keysNotes.length === 0 ? 'starting…' : keysNotes.join('; ')} (see /clausper keys)\n\nVoice\n${[await speechReport($), voiceReport(kit, packages, chosen)].filter(part => part !== '').join('\n')}\n${
             speaks
               ? chosen === null
                 ? 'Kokoro is ready. Turn it on with /clausper voice kokoro.'
@@ -1387,6 +1580,8 @@ export const register: Register = on => {
   // to go stale. A /clear keeps the process, what it is saying, and its turn.
   on('session.end', async ($, e, next) => {
     if (e.reason !== 'clear') {
+      keysRun?.stop()
+      keysRun = null
       await Promise.all([...liveSyntheses].map(synthesis => synthesis.dispose()))
       if (heldFloor !== '') await releaseFloor($, heldFloor)
     }
@@ -1684,7 +1879,7 @@ export const register: Register = on => {
           </Text>
           {speaking && (
             <Button key="caption-stop" plain onPress={() => stopSpeaking($)}>
-              stop
+              stop{stopChord === null ? '' : <Text dimColor> {stopChord}</Text>}
             </Button>
           )}
         </Box>

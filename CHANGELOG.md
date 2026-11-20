@@ -2,6 +2,17 @@
 
 All notable changes to Clausper. Dates are when the change shipped to the mod.
 
+## 0.5.0 — 2026-11-19
+
+### Added
+- A global key to stop speech on macOS: ⌃⌥S, from any app, even when the terminal is in the background. It stops every session that is speaking, listening or waiting for its turn.
+- `/clausper keys` shows and changes the shortcuts: `/clausper keys stop cmd+shift+s` rebinds stop, and `mute` (toggle), `again` and `listen` can get chords too. `/clausper keys off`, `on` and `reset`.
+- The caption's stop button shows the chord.
+- README: how to update the plugin, check and switch voices, copy the Kokoro model files from another machine (with their hashes), and fix a Kokoro setup that went wrong.
+
+### Security
+- The shortcuts come from `keys/clausper-keys.swift`, built on your Mac with `xcrun swiftc` (never downloaded) and rebuilt when its hash changes. It uses macOS hotkey registration: no Accessibility or Input Monitoring permission, and it sees only its own chords. It exits with its session.
+
 ## 0.4.1 — 2026-11-17
 
 ### Changed

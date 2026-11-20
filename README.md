@@ -27,11 +27,27 @@ Answer `y` to add the marketplace, then pick a scope (user is the usual choice).
 From a shell:
 
 ```
-claude plugin install clausper --marketplace kenawak/clausper
+claude plugin marketplace add kenawak/clausper --scope user
+claude plugin install clausper@clausper --scope user
 ```
 
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins,
 Add marketplace with `kenawak/clausper`, then Add plugin.
+
+`claude plugin list` should show `clausper@clausper` enabled. Start a new session afterwards:
+plugins load when a session starts.
+
+### Updating
+
+A new release reaches you only when you update. From a shell:
+
+```
+claude plugin marketplace update clausper
+claude plugin update clausper@clausper
+```
+
+Then start a new session. `claude plugin list` shows the version you run; a feature in this README
+that does nothing (the stop key, say) usually means an older version is still loaded.
 
 Landing page: https://clausper.kenawak.dev (source: https://github.com/kenawak/clausper-site)
 
@@ -101,15 +117,99 @@ match is deleted. Nothing is executed from the model files: they are data the mo
 reads. If the setup is interrupted, `/clausper voice install` picks up where it stopped.
 `/clausper setup` checks every piece.
 
-`/clausper voice kokoro` uses the default voice, `af_heart`. `/clausper voice bm_george`
-picks another: `af_` and `am_` are American female and male voices, `bf_` and `bm_` British;
-`/clausper voices` lists them all. `/clausper voice default` goes back to the system voice.
+You need about 500 MB of free disk and a network connection for this one setup; after it, Kokoro
+speaks fully offline. On Linux, install `espeak-ng` and a player first (see Linux above).
+
+### Check that it works
+
+    /clausper setup     lists uv, the model, the voices and the packages as found or missing
+    /clausper test      speaks a test line: you should hear Kokoro, not the system voice
+
+### Switch between voices
+
+    /clausper voices            lists every voice, system and Kokoro
+    /clausper voice kokoro      Kokoro's default voice, af_heart
+    /clausper voice bm_george   any other Kokoro voice by name
+    /clausper voice Samantha    a system voice by name (Linux: an espeak-ng language, e.g. en-gb)
+    /clausper voice default     back to the system default voice
+
+Kokoro's names start with `af_` and `am_` (American female and male) or `bf_` and `bm_` (British).
+Switching is instant once the files are there; the choice is kept for every session. Going back to
+the system voice leaves the Kokoro files in place, so switching back needs no download.
+
+### Skip the download: copy the files from another machine
+
+A machine that already runs Kokoro has both model files in `~/.clausper/models`. Copy them before
+running `/clausper voice kokoro` and it fetches only what is still missing:
+
+    ssh other-host 'mkdir -p ~/.clausper/models'
+    scp ~/.clausper/models/kokoro-v1.0.onnx ~/.clausper/models/voices-v1.0.bin other-host:~/.clausper/models/
+
+AirDrop or a USB drive works too; the names must stay exactly these. Check them on the new machine
+with `shasum -a 256` (Linux: `sha256sum`):
+
+| File | SHA-256 |
+| --- | --- |
+| `kokoro-v1.0.onnx` | `7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5` |
+| `voices-v1.0.bin` | `bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d` |
+
+A file whose hash differs: delete it and let `/clausper voice kokoro` download it.
+
+### If something goes wrong
+
+Start with `/clausper setup`: it names the missing piece and the command that fixes it.
+
+| Symptom | Fix |
+| --- | --- |
+| A toast says Kokoro failed and the system voice took over | `/clausper setup`, then fix the line marked missing |
+| Setup says the packages are missing | `/clausper voice install` once while online (about 130 MB) |
+| Setup says "not checked: install uv and the model files first" | a model file is missing or misnamed in `~/.clausper/models`; `/clausper voice install` |
+| The setup was interrupted | `/clausper voice install` picks up where it stopped |
+| Linux: no sound from Kokoro | install a player: `pw-play` (pipewire-bin), `paplay`, `aplay` or sox's `play` |
+
+To test Kokoro outside Claude Code, run the same offline check Clausper uses (use
+`~/.clausper/bin/uv` if uv came from Clausper's setup, and your installed version in the path).
+It prints the voice names, `af_heart` among them:
+
+    cd ~ && uv run --offline --locked --no-config --quiet \
+      --script ~/.claude/plugins/cache/clausper/clausper/<version>/tts/kokoro.py \
+      --model ~/.clausper/models/kokoro-v1.0.onnx \
+      --voices ~/.clausper/models/voices-v1.0.bin --list
+
+### How it runs
 
 Each utterance starts `tts/kokoro.py`, a short Python script in this repository. On Apple Silicon
 the first sentence is ready in two to three seconds (the model loading), and each one after it in
 well under a second, while the sentence before it plays. For a long reply the summary's audio is
 made while the opening sentence is spoken. If Kokoro cannot speak, for any reason, the system voice
 says the rest and a toast says why.
+
+## A key to stop it (macOS)
+
+Press **⌃⌥S** (control, option, S) in any app to stop Clausper mid-sentence, even when the
+terminal is not in front. It stops every session that is speaking, listening or waiting for its
+turn. Pick your own chord, and add more actions:
+
+    /clausper keys                      shows the shortcuts and whether they are ready
+    /clausper keys stop cmd+shift+s     a different chord for stop
+    /clausper keys mute ctrl+alt+m      also: mute (toggles), again, listen
+    /clausper keys again off            clears one
+    /clausper keys off | on | reset     all off, back on, back to the default
+
+A chord is modifiers (`cmd`, `shift`, `alt`/`opt`, `ctrl`) plus one key: a letter, a digit,
+punctuation, `space`, an arrow, or `f1` to `f19` (a function key may stand alone). While Claude
+Code runs, the chord belongs to Clausper in every app, so `cmd+shift+s` would take "Save As" away
+from your editor; that is why the default is ⌃⌥S.
+
+The shortcuts come from a small helper, `keys/clausper-keys.swift`, which Clausper builds once with
+the Xcode command line tools (`xcode-select --install` if you have none) into
+`~/.clausper/bin` and rebuilds when its source changes. It uses macOS's hotkey registration, so it
+needs no Accessibility or Input Monitoring permission and never sees any other key. It exits with
+its session. Linux has no such helper yet; `/clausper stop` and the pane's `s` still work there.
+
+If the key does nothing: `claude plugin list` must show 0.5.0 or later (see Updating), and
+`/clausper keys` must say `stop: ⌃⌥S` under Helper. Another app that already holds the same chord
+shows there as "taken"; pick a different one.
 
 ## Several sessions at once
 
@@ -175,6 +275,13 @@ where noted.
   `mkdir -p`, `mv` and `rm` to put files in place in `~/.clausper` and remove `.part` files;
   `uv sync --script tts/kokoro.py --locked --no-config` to download the pinned packages into
   uv's cache.
+- macOS, for the shortcuts (unless `/clausper keys off`): `shasum -a 256` on
+  `keys/clausper-keys.swift` at each session start; when it changed, `xcode-select -p` (are the
+  command line tools there?), `xcrun swiftc -O` to build it into `~/.clausper/bin`, and `mv` to put
+  it in place, with its hash beside it. Then the built `clausper-keys` with your chords as
+  arguments; it prints one line per press, writes its process id to `~/.clausper/run`, and exits
+  when its session does. A stop press writes the time into `~/.clausper/run/stop`, which a session
+  that is speaking, listening or waiting reads four times a second.
 - `mkdir -m 700 ~/.clausper/floor`, before speaking or listening, to take this session's turn:
   only one session can create the folder. The holder writes a random id and the time into
   `floor/owner` every two seconds and removes the folder (`rm -rf`) when its turn ends or the
@@ -200,7 +307,7 @@ coming from the plugin for Claude Code's hooks and transcript; the model reads i
 `CLAUSPER_RECORDER`, `CLAUSPER_WHISPER` and `CLAUSPER_UV`, the reply text,
 the paths and commands of tool calls in your session, and files you choose to open from the pane.
 It reads no credentials, keys or tokens, and stores only its own settings (voice, listen mode,
-wake word, private mode) in the plugin store Claude Code provides.
+wake word, private mode, shortcuts) in the plugin store Claude Code provides.
 
 Security: [SECURITY.md](SECURITY.md). Privacy: [PRIVACY.md](PRIVACY.md). Terms: [TERMS.md](TERMS.md).
 
@@ -209,7 +316,8 @@ Security: [SECURITY.md](SECURITY.md). Privacy: [PRIVACY.md](PRIVACY.md). Terms: 
 - `/clausper` opens the pane
 - `/clausper mute` and `/clausper unmute` silence or restore speech
 - `/clausper again` repeats the last summary
-- `/clausper stop` cuts speech off
+- `/clausper stop` cuts speech off; ⌃⌥S does it from any app (macOS)
+- `/clausper keys` shows or changes the global shortcuts (see "A key to stop it" above)
 - `/clausper captions off` and `/clausper captions on` hide or show the caption line
 - `/clausper listen` listens once; `/clausper listen auto|fill|off` sets the mode; `/clausper setup` checks the tools
 - `/clausper wake on|off` requires "Clausper, …" before a spoken prompt is sent (on by default)
@@ -223,7 +331,8 @@ In the pane, `m` mutes, `a` says the last summary again, `s` stops, `l` listens,
 
 ## Developing
 
-The mod is a Claude Code hooks module: `hooks/register.tsx`, its state contract in
+The mod is a Claude Code hooks module: `hooks/register.tsx`, the shortcut helper in
+`keys/clausper-keys.swift`, its state contract in
 `types/index.d.ts`, tests in `tests/`. Run it from this folder with
 `claude --plugin-dir .`, check it with `claude plugin validate .` and `claude plugin test .`.
 The landing page is its own repository: https://github.com/kenawak/clausper-site.
