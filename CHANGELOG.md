@@ -8,6 +8,7 @@ All notable changes to Clausper. Dates are when the change shipped to the mod.
 - A global key to stop speech on macOS: ⌃⌥S, from any app, even when the terminal is in the background. It stops every session that is speaking, listening or waiting for its turn.
 - `/clausper keys` shows and changes the shortcuts: `/clausper keys stop cmd+shift+s` rebinds stop, and `mute` (toggle), `again` and `listen` can get chords too. `/clausper keys off`, `on` and `reset`.
 - The caption's stop button shows the chord.
+- What each summary costs: the pane shows its tokens and dollars (Claude Haiku 5.5 at API list prices) and the session's total in its header. `/clausper cost` totals this session, today and all time, and the share of the session's cost. Short replies and private mode make no call and cost nothing.
 - README: how to update the plugin, check and switch voices, copy the Kokoro model files from another machine (with their hashes), and fix a Kokoro setup that went wrong.
 
 ### Security

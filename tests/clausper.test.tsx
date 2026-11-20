@@ -106,6 +106,39 @@ test('a long reply: the opening sentence is spoken at once, then the summary', a
   }
 })
 
+test('cost: each summary shows its tokens and dollars, and /clausper cost totals them', async ($, on) => {
+  const spoken: string[] = []
+  const priced: ModelCompleteResult = {
+    ...ANSWERED,
+    usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+  }
+  const { clock } = engine(on, spoken, priced)
+  on('session.usage', () => ({ value: { startedAt: 0, context: {}, rateLimits: [], cost: { usd: 0.04 } } }))
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const turnId of ['c1', 'c2']) {
+    await $.turn.start({ text: 'build it', turnId })
+    await $.turn.complete({ answer: LONG_REPLY, durationMs: 10, isAborted: false, turnId, reason: 'answer' })
+    await clock.advance(1)
+  }
+  // A short reply makes no call and costs nothing.
+  await $.turn.start({ text: 'hi', turnId: 'c3' })
+  await $.turn.complete({ answer: 'Done.', durationMs: 10, isAborted: false, turnId: 'c3', reason: 'answer' })
+  await clock.advance(1)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /2\.4k tokens ≈\$0\.0004/ })).toBeDefined()
+  await ui.press({ key: 'turn:c1' })
+  expect(await ui.find({ type: 'Text', text: /1\.2k tokens, ≈\$0\.0002/ })).toBeDefined()
+  await ui.unmount()
+
+  const report = await $.command.run({ command: 'clausper', args: 'cost', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+  const text = 'text' in report ? report.text : ''
+  expect(text).toContain('this session  2 summaries, 2.4k tokens, ≈$0.0004')
+  expect(text).toContain('today         2 summaries, 2.4k tokens, ≈$0.0004')
+  expect(text).toContain("1.0% of this session's ≈$0.040")
+})
+
 test('a short reply is spoken as it is, with no summary call', async ($, on) => {
   const spoken: string[] = []
   const { clock, calls } = engine(on, spoken)

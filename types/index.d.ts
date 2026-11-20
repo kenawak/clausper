@@ -28,7 +28,14 @@ export type TurnRecord = {
   answerChars: number
   /** How long the summary took, in milliseconds; 0 when none was needed. */
   summaryMs: number
+  /** What the summary's model call used, in tokens; 0 when no call was made. */
+  tokens: number
+  /** The same call at API list prices, in US dollars. */
+  usd: number
 }
+
+/** What Clausper's own model calls used: a count, tokens, and US dollars at list prices. */
+export type Spend = { calls: number; tokens: number; usd: number }
 
 export type View =
   | { kind: 'list' }
@@ -56,6 +63,8 @@ declare module 'claude-code' {
       wake: boolean
       /** No model call: summaries come from the reply's own sentences. */
       isPrivate: boolean
+      /** What this session's summaries have used so far. */
+      spent: Spend
     }
   }
 }

@@ -22,7 +22,8 @@ import {
   untar,
 } from './platform'
 
-import type { Change, ListenMode, TurnRecord, View } from '../types'
+import type { ModelUsage } from 'claude-code'
+import type { Change, ListenMode, Spend, TurnRecord, View } from '../types'
 
 const PANE = 'clausper'
 const MAX_TURNS = 30
@@ -40,7 +41,7 @@ const MODEL_FILE = 'ggml-base.en.bin'
 // Bump a shape tag when a record's fields change: it declines what an earlier
 // version stored, which outlives a reload.
 const turns = atom({ plugin: 'clausper', key: 'turns' } as const, [], {
-  shape: 'turns-2',
+  shape: 'turns-3',
 })
 const view = atom(
   { plugin: 'clausper', key: 'view' } as const,
@@ -60,6 +61,8 @@ const lastListen = atom({ plugin: 'clausper', key: 'lastListen' } as const, null
 const wake = atom({ plugin: 'clausper', key: 'wake' } as const, true)
 // Private mode: no model call at all; the spoken summary is the reply's own opening sentences.
 const isPrivate = atom({ plugin: 'clausper', key: 'isPrivate' } as const, false)
+const NO_SPEND: Spend = { calls: 0, tokens: 0, usd: 0 }
+const spent = atom({ plugin: 'clausper', key: 'spent' } as const, NO_SPEND)
 
 // Bumped by stop: a sentence loop that sees another generation ends.
 let speakGeneration = 0
@@ -137,6 +140,90 @@ const trimAnswer = (answer: string) => {
   return `${head}\n\n[... middle of the reply cut for length ...]\n\n${tail}`
 }
 
+// ---------------------------------------------------------------- cost
+
+// Claude Haiku 5.5's API list prices, in US dollars per million tokens (for
+// prompts under 100K tokens, which a summary always is). On a subscription no
+// call is billed: the tokens count toward its usage limits, and the dollars say
+// what they would cost on the API.
+const HAIKU_USD_PER_MTOK = { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 }
+
+const costOf = (usage: ModelUsage): Spend => {
+  const price = HAIKU_USD_PER_MTOK
+  const tokens = usage.input_tokens + usage.output_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+  const usd =
+    (usage.input_tokens * price.input +
+      usage.output_tokens * price.output +
+      usage.cache_read_input_tokens * price.cacheRead +
+      usage.cache_creation_input_tokens * price.cacheWrite) /
+    1e6
+  return { calls: tokens > 0 ? 1 : 0, tokens, usd }
+}
+
+const addSpend = (a: Spend, b: Spend): Spend => ({ calls: a.calls + b.calls, tokens: a.tokens + b.tokens, usd: a.usd + b.usd })
+
+const asSpend = (value: unknown): Spend => {
+  const one = value as Partial<Spend> | undefined
+  const num = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0)
+  return { calls: num(one?.calls), tokens: num(one?.tokens), usd: num(one?.usd) }
+}
+
+// 1234 → "1.2k"
+const tokenText = (tokens: number) => (tokens < 1000 ? `${tokens}` : `${(tokens / 1000).toFixed(tokens < 10000 ? 1 : 0)}k`)
+
+// Fractions of a cent need more digits than whole dollars.
+const usdText = (usd: number) =>
+  usd === 0 ? '$0' : usd < 0.01 ? `$${usd.toFixed(4)}` : usd < 1 ? `$${usd.toFixed(3)}` : `$${usd.toFixed(2)}`
+
+const spendText = (spend: Spend) =>
+  `${spend.calls} summar${spend.calls === 1 ? 'y' : 'ies'}, ${tokenText(spend.tokens)} tokens, ≈${usdText(spend.usd)}`
+
+const localDay = (ms: number) => {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// Today's and the all-time totals, in the plugin's store, which every session
+// shares: they count every session's summaries.
+type Ledger = { day: string; today: Spend; total: Spend; since: string }
+
+const readLedger = async ($: Engine, today: string): Promise<Ledger> => {
+  const stored = (await $.store.get('spend')) as Partial<Ledger> | undefined
+  const day = typeof stored?.day === 'string' ? stored.day : today
+  return {
+    day: today,
+    today: day === today ? asSpend(stored?.today) : NO_SPEND,
+    total: asSpend(stored?.total),
+    since: typeof stored?.since === 'string' ? stored.since : today,
+  }
+}
+
+const recordSpend = async ($: Engine, cost: Spend) => {
+  if (cost.calls === 0) return
+  await update($, spent, total => addSpend(total, cost))
+  const ledger = await readLedger($, localDay(await $.clock.now()))
+  await $.store.set('spend', { ...ledger, today: addSpend(ledger.today, cost), total: addSpend(ledger.total, cost) })
+}
+
+const costReport = async ($: Engine) => {
+  const session = await read($, spent)
+  const ledger = await readLedger($, localDay(await $.clock.now()))
+  const usage = await $.session.usage()
+  const share =
+    usage.cost !== undefined && usage.cost.usd > 0
+      ? ` That is ${((session.usd / usage.cost.usd) * 100).toFixed(1)}% of this session's ≈${usdText(usage.cost.usd)}.`
+      : ''
+  return [
+    'What Clausper\'s summaries cost (Claude Haiku 5.5):',
+    `  this session  ${spendText(session)}`,
+    `  today         ${spendText(ledger.today)}`,
+    `  since ${ledger.since}  ${spendText(ledger.total)}`,
+    '',
+    `Only long replies make a call; short ones and private mode are free.${share}`,
+    'On a subscription nothing is billed per call: the tokens count toward your usage limits, and the dollars are what the API would charge.',
+  ].join('\n')
+}
+
 // ---------------------------------------------------------------- summary
 
 type Summary = Pick<TurnRecord, 'headline' | 'spoken' | 'asks' | 'status'>
@@ -167,7 +254,7 @@ const parseSummary = (text: string): Summary | null => {
   }
 }
 
-const summarize = async ($: Engine, answer: string, plain: string, lead: string): Promise<Summary> => {
+const summarize = async ($: Engine, answer: string, plain: string, lead: string): Promise<{ summary: Summary; cost: Spend }> => {
   const reply = await $.model.complete({
     model: 'haiku',
     system: SYSTEM,
@@ -176,11 +263,12 @@ const summarize = async ($: Engine, answer: string, plain: string, lead: string)
     effort: 'low',
     timeoutMs: 20000,
   })
+  const cost = costOf(reply.usage)
   if (!reply.isAnswered) {
     $.ui.log(`clausper: summary not answered (${reply.reason})`, { to: 'debug' })
-    return fallbackSummary(plain, lead)
+    return { summary: fallbackSummary(plain, lead), cost }
   }
-  return parseSummary(reply.text) ?? fallbackSummary(plain, lead)
+  return { summary: parseSummary(reply.text) ?? fallbackSummary(plain, lead), cost }
 }
 
 // ---------------------------------------------------------------- the floor
@@ -1249,12 +1337,15 @@ const digestInner = async ($: Engine, id: string, answer: string) => {
   await patchTurn($, id, { lead, headline: clip(lead, 60) })
   const offline = await read($, isPrivate)
   const summarized = (async () => {
-    const summary = offline ? fallbackSummary(plain, lead) : await summarize($, answer, plain, lead)
+    const { summary, cost } = offline
+      ? { summary: fallbackSummary(plain, lead), cost: NO_SPEND }
+      : await summarize($, answer, plain, lead)
     const finished = await $.clock.now()
     const summaryMs = finished - started
-    await patchTurn($, id, { ...summary, summaryMs })
+    await patchTurn($, id, { ...summary, summaryMs, tokens: cost.tokens, usd: cost.usd })
+    await recordSpend($, cost)
     $.ui.status(undefined)
-    $.ui.log(`clausper: summary in ${summaryMs} ms (${summary.status})`, { to: 'debug' })
+    $.ui.log(`clausper: summary in ${summaryMs} ms (${summary.status}, ${tokenText(cost.tokens)} tokens)`, { to: 'debug' })
     return summary
   })()
   // Awaited below; this keeps a failure while waiting for the floor from going unhandled.
@@ -1345,7 +1436,7 @@ const kindMark = (change: Change) =>
   change.kind === 'write' ? '+' : change.kind === 'ran' ? '$' : '±'
 
 const USAGE =
-  'Usage: /clausper [mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | keys [<action> <chord>|off|on|reset] | setup | voice <name>|kokoro|install | voices | test]'
+  'Usage: /clausper [mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | keys [<action> <chord>|off|on|reset] | cost | setup | voice <name>|kokoro|install | voices | test]'
 
 // ---------------------------------------------------------------- register
 
@@ -1372,7 +1463,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'clausper',
       description:
-        'Clausper: open the pane; or mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | keys | setup | voice <name>|kokoro|install | voices | test',
+        'Clausper: open the pane; or mute | unmute | again | stop | captions on|off | listen [auto|fill|off] | wake on|off | private on|off | keys | cost | setup | voice <name>|kokoro|install | voices | test',
     })
     const stored = await $.store.get('listenMode')
     if (stored === 'auto' || stored === 'fill' || stored === 'off') {
@@ -1458,6 +1549,10 @@ export const register: Register = on => {
             : 'Private mode off: long replies are summarized by Haiku through your session.',
         }
       }
+      case 'cost':
+      case 'usage':
+      case 'spend':
+        return { text: await costReport($) }
       case 'keys':
       case 'shortcuts': {
         const [first = '', ...chordParts] = arg.toLowerCase().split(/\s+/).filter(part => part !== '')
@@ -1641,6 +1736,8 @@ export const register: Register = on => {
       changes,
       answerChars: e.answer.length,
       summaryMs: 0,
+      tokens: 0,
+      usd: 0,
     }
     await update($, turns, list => [turn, ...list.filter(one => one.id !== turn.id)].slice(0, MAX_TURNS))
     await update($, view, (current): View => (current.kind === 'list' ? current : { kind: 'list' }))
@@ -1671,6 +1768,7 @@ export const register: Register = on => {
     const privateOn = await read($, isPrivate)
     const lastHeard = await read($, heard)
     const listenNote = await read($, lastListen)
+    const sessionSpend = await read($, spent)
     const now = await $.clock.now()
     const width = Math.max(20, e.props.bodyColumns)
 
@@ -1690,6 +1788,11 @@ export const register: Register = on => {
           <Text bold>Clausper</Text>
           <Text dimColor>{state}</Text>
           <Text dimColor>· ears {ears}{wakeOn && ears === 'auto' ? ' · wake' : ''}{privateOn ? ' · private' : ''}</Text>
+          {sessionSpend.calls > 0 && (
+            <Text dimColor>
+              · {tokenText(sessionSpend.tokens)} tokens ≈{usdText(sessionSpend.usd)}
+            </Text>
+          )}
         </Box>
         <Box gap={1} flexWrap="wrap">
           <Button key="mute" hotkey="m" plain onPress={() => update($, isMuted, value => !value)}>
@@ -1786,6 +1889,7 @@ export const register: Register = on => {
             <Text dimColor>
               {ago(turn.at, now)} ago · {turn.answerChars} chars in the reply
               {turn.summaryMs > 0 ? ` · summary in ${(turn.summaryMs / 1000).toFixed(1)}s` : ''}
+              {turn.tokens > 0 ? ` · ${tokenText(turn.tokens)} tokens, ≈${usdText(turn.usd)}` : ''}
               {turn.status === 'fallback' ? ' · summary from the reply itself' : ''}
             </Text>
           </Box>

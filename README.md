@@ -211,6 +211,15 @@ If the key does nothing: `claude plugin list` must show 0.5.0 or later (see Upda
 `/clausper keys` must say `stop: ⌃⌥S` under Helper. Another app that already holds the same chord
 shows there as "taken"; pick a different one.
 
+## What it costs
+
+Short replies are spoken as they are, with no model call. A long reply gets one Claude Haiku 5.5
+call for its summary: one to four thousand tokens, well under a tenth of a cent at API prices. The pane
+shows each summary's tokens and dollars and the session's total in its header, and
+`/clausper cost` totals this session, today and all time, and says what share of the session's cost
+that is. On a subscription nothing is billed per call; the tokens count toward your usage limits.
+`/clausper private on` makes no calls at all.
+
 ## Several sessions at once
 
 Each Claude Code session runs its own Clausper, and they take turns. When two sessions finish
@@ -322,6 +331,7 @@ Security: [SECURITY.md](SECURITY.md). Privacy: [PRIVACY.md](PRIVACY.md). Terms: 
 - `/clausper listen` listens once; `/clausper listen auto|fill|off` sets the mode; `/clausper setup` checks the tools
 - `/clausper wake on|off` requires "Clausper, …" before a spoken prompt is sent (on by default)
 - `/clausper private on|off` skips the model call entirely and speaks the reply's own opening sentences
+- `/clausper cost` shows what the summaries have used: this session, today and all time
 - `/clausper voice <name>` picks a system voice or a Kokoro voice (`af_heart`, `bm_george`, …),
   `/clausper voice kokoro` the default Kokoro voice, `/clausper voice default` the system default,
   `/clausper voice install` sets Kokoro up again if anything is missing; `/clausper voices` lists them all
