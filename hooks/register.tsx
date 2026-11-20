@@ -890,7 +890,11 @@ const sayUnlessMuted = async ($: Engine, text: string) => {
   if (!muted) await speak($, text)
 }
 
+// Bumped by every stop: a reply stopped during its lead skips its summary and listening.
+let stopCount = 0
+
 const stopSpeaking = async ($: Engine) => {
+  stopCount += 1
   speakGeneration += 1
   floorWait += 1
   playback?.abort()
@@ -1300,6 +1304,8 @@ const digestInner = async ($: Engine, id: string, answer: string) => {
   const plain = plainText(answer)
   const muted = await read($, isMuted)
   const listens = (await read($, listenMode)) !== 'off'
+  const stopsBefore = stopCount
+  const isStopped = () => stopCount !== stopsBefore
 
   // The turn's voice, lead to listen, is one turn on the floor: another session's
   // summary never lands between this one's lead and its rest. A session that had
@@ -1309,7 +1315,7 @@ const digestInner = async ($: Engine, id: string, answer: string) => {
     await holdFloor($, async turn => {
       const name = turn === 'waited' && !muted ? await projectName($) : ''
       if (name !== '') await speak($, `In ${name}.`)
-      await work()
+      if (!isStopped()) await work()
     })
   }
 
@@ -1326,7 +1332,7 @@ const digestInner = async ($: Engine, id: string, answer: string) => {
     $.ui.status(undefined)
     await voiced(async () => {
       if (!muted) await speak($, plain)
-      await afterSpeaking($)
+      if (!isStopped()) await afterSpeaking($)
     })
     return
   }
@@ -1354,10 +1360,14 @@ const digestInner = async ($: Engine, id: string, answer: string) => {
     const leadSpoken = muted ? Promise.resolve() : speak($, lead)
     const summary = await summarized
     // Start the summary's audio while the lead is still playing, so it follows without a gap.
-    const rest = muted ? null : await prepare($, [summary.spoken, summary.asks].filter(part => part !== '').join(' '))
+    const rest = muted || isStopped() ? null : await prepare($, [summary.spoken, summary.asks].filter(part => part !== '').join(' '))
     await leadSpoken
+    if (isStopped()) {
+      await (await rest?.synthesis)?.dispose()
+      return
+    }
     if (rest !== null) await speak($, rest)
-    await afterSpeaking($)
+    if (!isStopped()) await afterSpeaking($)
   })
   await summarized
 }

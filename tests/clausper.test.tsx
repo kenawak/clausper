@@ -44,7 +44,8 @@ const LONG_REPLY = [
 const LEAD = 'Done Clausper is built and loaded.'
 
 // Nothing sits beneath the plugin: each hook here stands for the engine.
-const engine = (on: On, spoken: string[], completion: ModelCompleteResult = ANSWERED, cwd = '/') => {
+// `summaryMs`: how long Haiku takes to write the summary.
+const engine = (on: On, spoken: string[], completion: ModelCompleteResult = ANSWERED, cwd = '/', summaryMs = 0) => {
   const clock = mock.clock(on)
   mock.store(on)
   const calls = { model: 0 }
@@ -63,8 +64,9 @@ const engine = (on: On, spoken: string[], completion: ModelCompleteResult = ANSW
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
   on('tool.call', () => ({ result: {} }))
-  on('model.complete', () => {
+  on('model.complete', async () => {
     calls.model += 1
+    if (summaryMs > 0) await clock.sleep(summaryMs)
     return { value: completion }
   })
   on('audio.speak', (_, e) => {
@@ -621,6 +623,24 @@ test('shortcuts: the helper is built from its source and its stop key tells ever
   await clock.advance(5000)
   // Stamped with the time of the press, which every busy session reads.
   expect(Number(k.writes.get(STOP_FILE))).toBe(5000)
+})
+
+test('shortcuts: stop pressed during a long reply\'s lead also drops the summary that follows', async ($, on) => {
+  const spoken: string[] = []
+  const { clock } = engine(on, spoken, ANSWERED, '/', 3000)
+  const k = macKeys(on, clock, { pressAfter: 1000 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'build it', turnId: 's0' })
+  await $.turn.complete({ answer: LONG_REPLY, durationMs: 10, isAborted: false, turnId: 's0', reason: 'answer' })
+  await clock.advance(1)
+  expect(spoken).toEqual([LEAD])
+
+  await clock.advance(5000)
+  expect(k.writes.has(STOP_FILE)).toBe(true)
+  expect(spoken).toEqual([LEAD])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Button', text: /Added the Clausper pane/ })).toBeDefined()
+  await ui.unmount()
 })
 
 test('shortcuts: a stop another session stamped ends this one\'s wait for its turn', async ($, on) => {
